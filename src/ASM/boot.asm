@@ -7,19 +7,24 @@ start:
     mov es, ax
     mov ss, ax
     mov sp, 0x7C00
+    push dx
 
     mov ah, 0x00
     mov al, 0x03
     int 0x10
 
-    mov si, msg_title
-    call print_string
-
     mov si, msg_boot
     call print_string
 
+    pop dx
+    push dx
+    xor ax, ax
+    int 0x13
+    jc disk_error
+
+    pop dx
     mov ah, 0x02
-    mov al, 50
+    mov al, 98
     mov ch, 0
     mov cl, 2
     mov dh, 0
@@ -96,20 +101,18 @@ disk_error:
     call print_string
     jmp $
 
-msg_title:
-    db "HarLin Boot", 0x0D, 0x0A, 0
 msg_boot:
-    db "Load Kernel....", 0
+    db "Loading kernel...", 0
 msg_ok:
-    db "OK", 0x0D, 0x0A, 0
+    db " OK", 0x0D, 0x0A, 0
 msg_a20:
-    db "A20.......", 0
+    db "A20", 0
 msg_gdt:
-    db "GDT.......", 0
+    db "GDT", 0
 msg_spk:
-    db "Speaker...", 0
+    db "SPK", 0
 msg_prot:
-    db "PM Mode", 0x0D, 0x0A, 0
+    db "PM", 0x0D, 0x0A, 0
 msg_err:
     db "Error!", 0
 

@@ -8,7 +8,12 @@
 #define SC_LSHIFT_REL 0xAA
 #define SC_RSHIFT_REL 0xB6
 
+#define KEYBUF_SIZE 256
+
 static int shift_pressed = 0;
+static volatile unsigned char keybuf[KEYBUF_SIZE];
+static volatile int keybuf_head = 0;
+static volatile int keybuf_tail = 0;
 
 static unsigned char scancode_to_ascii[128] = {
     0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 0, 0,
@@ -35,17 +40,40 @@ static unsigned char scancode_to_ascii_shift[128] = {
 void keyboard_init(void)
 {
     shift_pressed = 0;
+    keybuf_head = 0;
+    keybuf_tail = 0;
     while (inb(KEYBOARD_STATUS_PORT) & 0x01) {
         inb(KEYBOARD_DATA_PORT);
     }
 }
 
+int keyboard_has_data(void)
+{
+    return keybuf_head != keybuf_tail;
+}
+
+void irq1_handler(void)
+{
+    unsigned char scancode = inb(KEYBOARD_DATA_PORT);
+    int next = (keybuf_tail + 1) % KEYBUF_SIZE;
+    if (next != keybuf_head) {
+        keybuf[keybuf_tail] = scancode;
+        keybuf_tail = next;
+    }
+}
+
 unsigned char keyboard_poll(void)
 {
-    if (inb(KEYBOARD_STATUS_PORT) & 0x01) {
-        return inb(KEYBOARD_DATA_PORT);
+    unsigned char scancode;
+    cli();
+    if (keybuf_head == keybuf_tail) {
+        sti();
+        return 0;
     }
-    return 0;
+    scancode = keybuf[keybuf_head];
+    keybuf_head = (keybuf_head + 1) % KEYBUF_SIZE;
+    sti();
+    return scancode;
 }
 
 char keyboard_scancode_to_ascii(unsigned char scancode)

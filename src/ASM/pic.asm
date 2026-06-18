@@ -1,5 +1,10 @@
 [BITS 32]
 
+SECTION .text
+
+global pic_init
+global pic_eoi
+
 pic_init:
     push eax
 

@@ -37,4 +37,14 @@ static inline void outl(unsigned short port, unsigned int data)
     __asm__ volatile ("outl %0, %1" : : "a"(data), "Nd"(port));
 }
 
+static inline void cli(void)
+{
+    __asm__ volatile ("cli");
+}
+
+static inline void sti(void)
+{
+    __asm__ volatile ("sti");
+}
+
 #endif

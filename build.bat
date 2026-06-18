@@ -17,7 +17,7 @@ set SUCCESS=%GREEN%[Success]%RESET%
 set FAILURE=%RED%[Failure]%RESET%
 set ERR=%RED%[Error]%RESET%
 
-set CFLAGS=-ffreestanding -c -m32 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx
+set CFLAGS=-ffreestanding -c -m32 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx -fno-leading-underscore
 
 if not exist build mkdir build
 
@@ -31,6 +31,21 @@ if errorlevel 1 (
 echo %SUCCESS% Compiling boot.asm
 
 set OBJS=
+for %%f in (src\ASM\*.asm) do (
+    set FILENAME=%%~nf
+    if /I "!FILENAME!" neq "boot" (
+        nasm -f coff %%f -o build\asm_!FILENAME!.o 2>build\error.log
+        if errorlevel 1 (
+            echo %FAILURE% Compiling %%f
+            echo %ERR%
+            type build\error.log
+            goto error
+        )
+        echo %SUCCESS% Compiling %%f
+        set OBJS=!OBJS! build\asm_!FILENAME!.o
+    )
+)
+
 for %%f in (src\Sys_C\*.c) do (
     set FILENAME=%%~nf
     gcc %CFLAGS% -o build\!FILENAME!.o %%f 2>build\error.log
@@ -61,6 +76,13 @@ if errorlevel 1 (
     goto error
 )
 echo %SUCCESS% Creating kernel.bin
+
+for /f %%a in ('"%MSYS_PATH%\usr\bin\truncate.exe" -s %%512 build\kernel.bin 2^>^&1') do set TRUNC_OUT=%%a
+if errorlevel 1 (
+    echo %FAILURE% Padding kernel.bin
+    echo %ERR%
+    goto error
+)
 
 copy /b build\boot.bin + build\kernel.bin build\HarLin.img >nul
 if errorlevel 1 (
