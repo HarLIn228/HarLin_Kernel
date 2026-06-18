@@ -24,7 +24,7 @@ start:
 
     pop dx
     mov ah, 0x02
-    mov al, 98
+    mov al, 120
     mov ch, 0
     mov cl, 2
     mov dh, 0
@@ -80,19 +80,64 @@ start:
     mov eax, cr0
     or eax, 1
     mov cr0, eax
-    jmp CODE_SEG:protected_mode
+    jmp CODE_SEG_32:protected_mode
 
 [BITS 32]
 protected_mode:
     cli
-    mov ax, DATA_SEG
+    mov ax, DATA_SEG_32
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
     mov esp, 0x90000
-    call 0x10000
+
+    mov edi, 0x20000
+    xor eax, eax
+    mov ecx, 0xC00
+    rep stosd
+
+    mov eax, 0x21003
+    mov [0x20000], eax
+
+    mov eax, 0x22003
+    mov [0x21000], eax
+
+    mov edi, 0x22000
+    mov eax, 0x83
+    mov ecx, 512
+set_pd:
+    mov [edi], eax
+    add edi, 8
+    add eax, 0x200000
+    loop set_pd
+
+    mov eax, 0x20000
+    mov cr3, eax
+    mov eax, cr4
+    or eax, 0x20
+    mov cr4, eax
+    mov ecx, 0xC0000080
+    rdmsr
+    or eax, 0x100
+    wrmsr
+    mov eax, cr0
+    or eax, 0x80000000
+    mov cr0, eax
+    jmp CODE_SEG_64:long_mode
+
+[BITS 64]
+long_mode:
+    mov ax, DATA_SEG_64
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov rsp, 0x90000
+    mov rax, 0x10000
+    call rax
     jmp $
 
 [BITS 16]
@@ -112,7 +157,7 @@ msg_gdt:
 msg_spk:
     db "SPK", 0
 msg_prot:
-    db "PM", 0x0D, 0x0A, 0
+    db "LM", 0x0D, 0x0A, 0
 msg_err:
     db "Error!", 0
 

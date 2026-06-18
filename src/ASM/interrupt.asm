@@ -1,4 +1,4 @@
-[BITS 32]
+[BITS 64]
 
 SECTION .text
 
@@ -9,30 +9,45 @@ global idt_load
 extern irq1_handler
 
 dummy_stub:
-    iret
+    iretq
 
 irq1_stub:
-    pusha
-    push ds
-    push es
-    push fs
-    push gs
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
+    push rax
+    push rcx
+    push rdx
+    push rbx
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
     call irq1_handler
     mov al, 0x20
     out 0x20, al
-    pop gs
-    pop fs
-    pop es
-    pop ds
-    popa
-    iret
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rbx
+    pop rdx
+    pop rcx
+    pop rax
+    iretq
 
 idt_load:
-    mov eax, [esp + 4]
-    lidt [eax]
+    mov rax, [rsp + 8]
+    lidt [rax]
     ret

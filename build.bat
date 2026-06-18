@@ -17,7 +17,9 @@ set SUCCESS=%GREEN%[Success]%RESET%
 set FAILURE=%RED%[Failure]%RESET%
 set ERR=%RED%[Error]%RESET%
 
-set CFLAGS=-ffreestanding -c -m32 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx -fno-leading-underscore
+set CC=x86_64-w64-mingw32-gcc
+set LD=ld
+set CFLAGS=-ffreestanding -c -m64 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx
 
 if not exist build mkdir build
 
@@ -34,7 +36,7 @@ set OBJS=
 for %%f in (src\ASM\*.asm) do (
     set FILENAME=%%~nf
     if /I "!FILENAME!" neq "boot" (
-        nasm -f coff %%f -o build\asm_!FILENAME!.o 2>build\error.log
+        nasm -f win64 %%f -o build\asm_!FILENAME!.o 2>build\error.log
         if errorlevel 1 (
             echo %FAILURE% Compiling %%f
             echo %ERR%
@@ -48,7 +50,7 @@ for %%f in (src\ASM\*.asm) do (
 
 for %%f in (src\Sys_C\*.c) do (
     set FILENAME=%%~nf
-    gcc %CFLAGS% -o build\!FILENAME!.o %%f 2>build\error.log
+    %CC% %CFLAGS% -o build\!FILENAME!.o %%f 2>build\error.log
     if errorlevel 1 (
         echo %FAILURE% Compiling %%f
         echo %ERR%
@@ -59,7 +61,7 @@ for %%f in (src\Sys_C\*.c) do (
     set OBJS=!OBJS! build\!FILENAME!.o
 )
 
-ld -T src\Sys_C\linker.ld -o build\kernel.tmp %OBJS% -m i386pe -nostdlib 2>build\error.log
+%LD% -T src\Sys_C\linker.ld -o build\kernel.tmp %OBJS% -m i386pep -nostdlib 2>build\error.log
 if errorlevel 1 (
     echo %FAILURE% Linking kernel
     echo %ERR%

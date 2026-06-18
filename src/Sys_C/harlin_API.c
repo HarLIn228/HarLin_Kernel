@@ -4,6 +4,8 @@
 #include "network.h"
 #include "interrupt.h"
 #include "display.h"
+#include "pmm.h"
+#include "vmm.h"
 
 extern void pic_init(void);
 
@@ -37,13 +39,13 @@ void Harlin_ConPrint(const char* str)
     }
 }
 
-void Harlin_ConPrintHex(u32 val)
+void Harlin_ConPrintHex(u64 val)
 {
-    const char hex[] = "0123456789ABCDEF";
+    const char* hex = "0123456789ABCDEF";
     int i;
     Harlin_ConPutChar('0');
     Harlin_ConPutChar('x');
-    for (i = 28; i >= 0; i -= 4) {
+    for (i = 60; i >= 0; i -= 4) {
         Harlin_ConPutChar(hex[(val >> i) & 0xF]);
     }
 }
@@ -153,6 +155,15 @@ int Harlin_NetInit(void)   { return network_init(); }
 int Harlin_HttpGet(const char* host, const char* path) { return network_http_get(host, path); }
 int Harlin_DNS(const char* domain, u8* out_ip)          { return dns_resolve(domain, out_ip); }
 
+void Harlin_PmmInit(void) { pmm_init(); }
+u64  Harlin_PmmAlloc(void) { return pmm_alloc(); }
+void Harlin_PmmFree(u64 addr) { pmm_free(addr); }
+
+void Harlin_VmmInit(u64 pml4_phys) { vmm_init(pml4_phys); }
+void Harlin_VmmMap(u64 virt, u64 phys, u64 flags) { vmm_map(virt, phys, flags); }
+void Harlin_VmmUnmap(u64 virt) { vmm_unmap(virt); }
+u64  Harlin_VmmGetPhys(u64 virt) { return vmm_get_phys(virt); }
+
 int Harlin_DisplaySetMode(int mode)
 {
     return display_set_mode(mode);
@@ -208,6 +219,9 @@ void Harlin_Boot(void)
     network_init();
     interrupts_enable();
 
+    Harlin_PmmInit();
+    Harlin_VmmInit(0x20000);
+
     screen_clear();
     Harlin_ConPrint("\n");
     Harlin_ConPrint("The HarLin\n");
@@ -217,6 +231,9 @@ void Harlin_Boot(void)
     Harlin_ConPrint("3. releasing it while complying with the MIT open-source license.\n");
     Harlin_ConPrint("\n");
     Harlin_ConPrint("(C) 2026 HarLin228 Studio\n");
+    Harlin_ConPrint("\n");
+    Harlin_ConPrint("Long mode enabled\n");
+    Harlin_ConPrint("Memory manager ready\n");
 
     for (;;) {
         Harlin_IntOff();

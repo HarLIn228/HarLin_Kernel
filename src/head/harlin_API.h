@@ -1,12 +1,14 @@
 #ifndef HARLIN_API_H
 #define HARLIN_API_H
 
-typedef unsigned char  u8;
-typedef unsigned short u16;
-typedef unsigned int   u32;
-typedef signed char    s8;
-typedef signed short   s16;
-typedef signed int     s32;
+typedef unsigned char      u8;
+typedef unsigned short     u16;
+typedef unsigned int       u32;
+typedef unsigned long long u64;
+typedef signed char        s8;
+typedef signed short       s16;
+typedef signed int         s32;
+typedef signed long long   s64;
 
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
@@ -14,7 +16,7 @@ void Harlin_Shutdown(void);
 void Harlin_ConClear(void);
 void Harlin_ConPutChar(char c);
 void Harlin_ConPrint(const char* str);
-void Harlin_ConPrintHex(u32 val);
+void Harlin_ConPrintHex(u64 val);
 void Harlin_ConPrintDec(s32 val);
 void Harlin_ConSetColor(u8 fg, u8 bg);
 
@@ -51,5 +53,19 @@ void Harlin_IntToStr(s32 val, char* buf);
 int  Harlin_NetInit(void);
 int  Harlin_HttpGet(const char* host, const char* path);
 int  Harlin_DNS(const char* domain, u8* out_ip);
+
+#define HARLIN_PAGE_SIZE 4096
+#define HARLIN_VMM_PRESENT  0x001
+#define HARLIN_VMM_WRITABLE 0x002
+#define HARLIN_VMM_USER     0x004
+
+void Harlin_PmmInit(void);
+u64  Harlin_PmmAlloc(void);
+void Harlin_PmmFree(u64 addr);
+
+void Harlin_VmmInit(u64 pml4_phys);
+void Harlin_VmmMap(u64 virt, u64 phys, u64 flags);
+void Harlin_VmmUnmap(u64 virt);
+u64  Harlin_VmmGetPhys(u64 virt);
 
 #endif

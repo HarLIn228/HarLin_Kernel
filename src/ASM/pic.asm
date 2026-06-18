@@ -1,4 +1,4 @@
-[BITS 32]
+[BITS 64]
 
 SECTION .text
 
@@ -6,7 +6,7 @@ global pic_init
 global pic_eoi
 
 pic_init:
-    push eax
+    push rax
 
     mov al, 0x11
     out 0x20, al
@@ -31,12 +31,12 @@ pic_init:
     mov al, 0xFF
     out 0xA1, al
 
-    pop eax
+    pop rax
     ret
 
 pic_eoi:
-    push eax
+    push rax
     mov al, 0x20
     out 0x20, al
-    pop eax
+    pop rax
     ret
