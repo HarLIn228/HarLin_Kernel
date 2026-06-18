@@ -255,9 +255,6 @@ void Harlin_Boot(void)
     Harlin_ConPrint("\n");
     Harlin_ConPrint("(C) 2026 HarLin228 Studio\n");
     Harlin_ConPrint("\n");
-    Harlin_ConPrint("Long mode enabled\n");
-    Harlin_ConPrint("Memory manager ready\n");
-
     for (;;) {
         Harlin_IntOff();
         if (!Harlin_KeyReady()) {
