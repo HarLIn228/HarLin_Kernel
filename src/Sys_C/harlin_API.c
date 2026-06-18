@@ -236,8 +236,6 @@ void Harlin_Shutdown(void)
 
 void Harlin_Boot(void)
 {
-    int disk_ok;
-
     idt_init();
     pic_init();
     keyboard_init();
@@ -259,13 +257,6 @@ void Harlin_Boot(void)
     Harlin_ConPrint("\n");
     Harlin_ConPrint("Long mode enabled\n");
     Harlin_ConPrint("Memory manager ready\n");
-
-    disk_ok = Harlin_DiskInit();
-    if (disk_ok == 0) {
-        Harlin_ConPrint("Disk I/O ready\n");
-    } else {
-        Harlin_ConPrint("Disk controller not found\n");
-    }
 
     for (;;) {
         Harlin_IntOff();
