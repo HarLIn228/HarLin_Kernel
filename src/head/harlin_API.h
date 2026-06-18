@@ -72,4 +72,32 @@ int  Harlin_DiskInit(void);
 int  Harlin_DiskReadSector(u64 lba, u8 count, void* buf);
 int  Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf);
 
+struct Harlin_PartitionInfo {
+    u8  active;
+    u8  type;
+    u32 start_lba;
+    u32 sector_count;
+};
+
+int Harlin_PartitionInit(void);
+int Harlin_PartitionCount(void);
+int Harlin_PartitionGet(int index, struct Harlin_PartitionInfo* out);
+
+struct Harlin_File {
+    u32 start_cluster;
+    u32 current_cluster;
+    u32 position;
+    u32 size;
+};
+
+#define HARLIN_FS_OK     0
+#define HARLIN_FS_ERROR -1
+#define HARLIN_FS_EOF   -2
+
+int  Harlin_FsMount(u32 partition_lba);
+int  Harlin_FsOpen(const char* name, struct Harlin_File* out);
+int  Harlin_FsRead(struct Harlin_File* file, void* buf, u32 len);
+u32  Harlin_FsSize(struct Harlin_File* file);
+void Harlin_FsClose(struct Harlin_File* file);
+
 #endif

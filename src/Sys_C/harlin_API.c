@@ -7,6 +7,7 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "ata.h"
+#include "partition.h"
 
 extern void pic_init(void);
 
@@ -168,6 +169,23 @@ u64  Harlin_VmmGetPhys(u64 virt) { return vmm_get_phys(virt); }
 int Harlin_DiskInit(void) { return ata_init(); }
 int Harlin_DiskReadSector(u64 lba, u8 count, void* buf) { return ata_read_sectors(lba, count, buf); }
 int Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf) { return ata_write_sectors(lba, count, buf); }
+
+int Harlin_PartitionInit(void) { return partition_init(); }
+int Harlin_PartitionCount(void) { return partition_count(); }
+
+int Harlin_PartitionGet(int index, struct Harlin_PartitionInfo* out)
+{
+    struct partition_entry entry;
+    if (partition_get(index, &entry) != 0)
+        return -1;
+    if (out) {
+        out->active = entry.active;
+        out->type = entry.type;
+        out->start_lba = entry.start_lba;
+        out->sector_count = entry.sector_count;
+    }
+    return 0;
+}
 
 int Harlin_DisplaySetMode(int mode)
 {
