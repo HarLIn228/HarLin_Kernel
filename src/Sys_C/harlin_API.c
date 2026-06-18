@@ -6,6 +6,7 @@
 #include "display.h"
 #include "pmm.h"
 #include "vmm.h"
+#include "ata.h"
 
 extern void pic_init(void);
 
@@ -164,6 +165,10 @@ void Harlin_VmmMap(u64 virt, u64 phys, u64 flags) { vmm_map(virt, phys, flags); 
 void Harlin_VmmUnmap(u64 virt) { vmm_unmap(virt); }
 u64  Harlin_VmmGetPhys(u64 virt) { return vmm_get_phys(virt); }
 
+int Harlin_DiskInit(void) { return ata_init(); }
+int Harlin_DiskReadSector(u64 lba, u8 count, void* buf) { return ata_read_sectors(lba, count, buf); }
+int Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf) { return ata_write_sectors(lba, count, buf); }
+
 int Harlin_DisplaySetMode(int mode)
 {
     return display_set_mode(mode);
@@ -213,6 +218,8 @@ void Harlin_Shutdown(void)
 
 void Harlin_Boot(void)
 {
+    int disk_ok;
+
     idt_init();
     pic_init();
     keyboard_init();
@@ -234,6 +241,13 @@ void Harlin_Boot(void)
     Harlin_ConPrint("\n");
     Harlin_ConPrint("Long mode enabled\n");
     Harlin_ConPrint("Memory manager ready\n");
+
+    disk_ok = Harlin_DiskInit();
+    if (disk_ok == 0) {
+        Harlin_ConPrint("Disk I/O ready\n");
+    } else {
+        Harlin_ConPrint("Disk controller not found\n");
+    }
 
     for (;;) {
         Harlin_IntOff();

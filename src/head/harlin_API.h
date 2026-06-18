@@ -68,4 +68,8 @@ void Harlin_VmmMap(u64 virt, u64 phys, u64 flags);
 void Harlin_VmmUnmap(u64 virt);
 u64  Harlin_VmmGetPhys(u64 virt);
 
+int  Harlin_DiskInit(void);
+int  Harlin_DiskReadSector(u64 lba, u8 count, void* buf);
+int  Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf);
+
 #endif
