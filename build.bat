@@ -17,7 +17,7 @@ set SUCCESS=%GREEN%[Success]%RESET%
 set FAILURE=%RED%[Failure]%RESET%
 set ERR=%RED%[Error]%RESET%
 
-set CFLAGS=-ffreestanding -c -m32 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx
+set CFLAGS=-ffreestanding -c -m32 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx
 
 if not exist build mkdir build
 

@@ -3,6 +3,7 @@
 #include "screen.h"
 #include "string.h"
 #include "io.h"
+#include "network.h"
 
 #define INPUT_MAX 256
 #define PROMPT "HarLin> "
@@ -223,6 +224,7 @@ static void exec_if(const char** p)
     }
     
     *p = block_end;
+    if (**p == '}') (*p)++;
     
     while (**p == ' ') (*p)++;
     
@@ -373,6 +375,41 @@ static void exec_block(const char* block)
         
         if (p[0] == 'c' && p[1] == 'a' && p[2] == 'l' && p[3] == 'c' && (p[4] == '(' || p[4] == ' ')) {
             exec_calc(&p);
+            continue;
+        }
+        
+        if (p[0] == 'u' && p[1] == 'r' && p[2] == 'l' && (p[3] == ' ' || p[3] == 0)) {
+            cmd_len = 0;
+            while (*p && *p != ';' && *p != '}' && cmd_len < 63) {
+                cmd_buf[cmd_len++] = *p++;
+            }
+            cmd_buf[cmd_len] = 0;
+            if (cmd_len > 0) {
+                int i2;
+                for (i2 = 0; i2 <= cmd_len && i2 < INPUT_MAX - 1; i2++) {
+                    input_buf[i2] = cmd_buf[i2];
+                }
+                exec_cmd();
+                input_buf[0] = 0;
+            }
+            continue;
+        }
+
+        if (p[0] == 'c' && p[1] == 'o' && p[2] == 'n' && p[3] == 'n'
+            && p[4] == 'e' && p[5] == 'c' && p[6] == 't' && (p[7] == ' ' || p[7] == 0)) {
+            cmd_len = 0;
+            while (*p && *p != ';' && *p != '}' && cmd_len < 63) {
+                cmd_buf[cmd_len++] = *p++;
+            }
+            cmd_buf[cmd_len] = 0;
+            if (cmd_len > 0) {
+                int i2;
+                for (i2 = 0; i2 <= cmd_len && i2 < INPUT_MAX - 1; i2++) {
+                    input_buf[i2] = cmd_buf[i2];
+                }
+                exec_cmd();
+                input_buf[0] = 0;
+            }
             continue;
         }
         
@@ -596,6 +633,20 @@ static void cmd_calc(const char* args)
     exec_calc(&p);
 }
 
+static void cmd_url(void)
+{
+    const char* s = "This feature is under development\n";
+    int k = 0;
+    while (s[k]) screen_put_char(s[k++]);
+}
+
+static void cmd_connect(void)
+{
+    const char* s = "https://harread.surge.sh\n";
+    int k = 0;
+    while (s[k]) screen_put_char(s[k++]);
+}
+
 static void cmd_help(void)
 {
     int i;
@@ -623,6 +674,10 @@ static void cmd_help(void)
     s = "calc    - Calculate\n";
     for (i = 0; s[i]; i++) screen_put_char(s[i]);
     s = "if      - Condition\n";
+    for (i = 0; s[i]; i++) screen_put_char(s[i]);
+    s = "url     - HTTP GET\n";
+    for (i = 0; s[i]; i++) screen_put_char(s[i]);
+    s = "connect - Connect to server\n";
     for (i = 0; s[i]; i++) screen_put_char(s[i]);
     screen_put_char('\n');
 }
@@ -669,6 +724,8 @@ static void exec_cmd(void)
     else if (cmd_match(p, "show")) { cmd_show(cmd_args(p)); }
     else if (cmd_match(p, "date")) { cmd_date(); }
     else if (cmd_match(p, "calc")) { cmd_calc(cmd_args(p)); }
+    else if (cmd_match(p, "url")) { cmd_url(); }
+    else if (cmd_match(p, "connect")) { cmd_connect(); }
     else {
         int i;
         const char* s = "Unknown: ";
