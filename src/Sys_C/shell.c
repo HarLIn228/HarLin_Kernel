@@ -22,6 +22,7 @@ static void exec_cmd(void);
 static int find_var(const char* name, int len)
 {
     int i;
+    if (len > VAR_NAME_LEN - 1) len = VAR_NAME_LEN - 1;
     for (i = 0; i < var_count; i++) {
         int j;
         for (j = 0; j < len && var_names[i][j]; j++) {
@@ -192,6 +193,18 @@ static const char* skip_block(const char* p)
 
 static void exec_block(const char* block);
 
+static void exec_block_copy(const char* start, const char* end)
+{
+    char temp[INPUT_MAX];
+    int len = 0;
+    while (start + len < end && len < INPUT_MAX - 1) {
+        temp[len] = start[len];
+        len++;
+    }
+    temp[len] = 0;
+    exec_block(temp);
+}
+
 static void exec_if(const char** p)
 {
     int condition_true;
@@ -216,11 +229,7 @@ static void exec_if(const char** p)
     block_end = skip_block(*p);
     
     if (condition_true) {
-        char saved = *block_end;
-        char* temp = (char*)block_end;
-        *temp = 0;
-        exec_block(block_start);
-        *temp = saved;
+        exec_block_copy(block_start, block_end);
     }
     
     *p = block_end;
@@ -248,11 +257,7 @@ static void exec_if(const char** p)
             block_end = skip_block(*p);
             
             if (!condition_true && else_condition) {
-                char saved = *block_end;
-                char* temp = (char*)block_end;
-                *temp = 0;
-                exec_block(block_start);
-                *temp = saved;
+                exec_block_copy(block_start, block_end);
             }
             
             *p = block_end;
@@ -344,11 +349,7 @@ static void exec_calc(const char** p)
     if (**p == '{') {
         const char* block_start = *p + 1;
         const char* block_end = skip_block(*p);
-        char saved = *block_end;
-        char* temp = (char*)block_end;
-        *temp = 0;
-        exec_block(block_start);
-        *temp = saved;
+        exec_block_copy(block_start, block_end);
         *p = block_end;
     }
 }
@@ -533,7 +534,7 @@ static void cmd_show(const char* args)
             val = var_values[j];
             if (val < 0) {
                 neg = 1;
-                val = -val;
+                val = (int)((unsigned int)(-(val + 1)) + 1);
             }
             if (val == 0) buf[i++] = '0';
             while (val > 0) {
@@ -546,20 +547,20 @@ static void cmd_show(const char* args)
         }
         return;
     }
-    
+
     if (!(p[0] >= 'a' && p[0] <= 'z') && !(p[0] >= 'A' && p[0] <= 'Z') && p[0] != '_') {
         screen_put_char('?');
         screen_put_char('\n');
         return;
     }
-    
+
     const char* start = p;
     while (is_var_char(*p)) p++;
     val = get_var_value(start, p - start);
-    
+
     if (val < 0) {
         neg = 1;
-        val = -val;
+        val = (int)((unsigned int)(-(val + 1)) + 1);
     }
     if (val == 0) buf[i++] = '0';
     while (val > 0) {

@@ -86,6 +86,7 @@ static unsigned short net_checksum(unsigned char* data, int len)
 {
     unsigned int sum = 0;
     int i;
+    if (len <= 0) return 0;
     for (i = 0; i < len - 1; i += 2) {
         sum += ((unsigned short)data[i] << 8) | data[i + 1];
     }
@@ -192,6 +193,7 @@ static void rtl_send_packet(unsigned char* pkt, int len)
 
     tx_len = len < 60 ? 60 : len;
 
+    if (len > TX_BUF_SIZE) len = TX_BUF_SIZE;
     for (i = 0; i < len; i++) {
         tx_buf[i] = pkt[i];
     }
@@ -422,10 +424,18 @@ int dns_resolve(const char* domain, unsigned char* out_ip)
         domain_len = 0;
         while (p[domain_len] && p[domain_len] != '.') domain_len++;
         if (domain_len > 63) domain_len = 63;
+        if (q_len + domain_len + 1 >= 512) {
+            net_putstr("DNS domain too long\n");
+            return 0;
+        }
         dns_q[q_len++] = (unsigned char)domain_len;
         for (i = 0; i < domain_len; i++) dns_q[q_len++] = p[i];
         p += domain_len;
         if (*p == '.') p++;
+    }
+    if (q_len + 5 >= 512) {
+        net_putstr("DNS domain too long\n");
+        return 0;
     }
     dns_q[q_len++] = 0x00;
 
@@ -447,7 +457,7 @@ int dns_resolve(const char* domain, unsigned char* out_ip)
                 if (len < ip_hdr_len + 8 + 14) { timeout--; continue; }
                 sport = ((unsigned short)rx[14 + ip_hdr_len] << 8) | rx[14 + ip_hdr_len + 1];
                 dport = ((unsigned short)rx[14 + ip_hdr_len + 2] << 8) | rx[14 + ip_hdr_len + 3];
-                if (sport == 53 && dport == net_htons(12346)) {
+                if (sport == 53 && dport == 12346) {
                     int dns_off = 14 + ip_hdr_len + 8;
                     unsigned short r_id = ((unsigned short)rx[dns_off] << 8) | rx[dns_off + 1];
                     if (r_id == dns_id) {
@@ -496,6 +506,7 @@ static int ip_send(unsigned char* dest_mac, unsigned char* dest_ip, unsigned cha
     int i, total_len;
     unsigned short cksum;
 
+    if (pay_len > 2014) pay_len = 2014;
     total_len = 14 + 20 + pay_len;
 
     for (i = 0; i < 6; i++) pkt[i] = dest_mac[i];
@@ -549,6 +560,7 @@ static void tcp_build_and_send(unsigned char* dest_mac, unsigned char* dest_ip,
     int i, tcp_len;
     unsigned short cksum;
 
+    if (data_len > 2028) data_len = 2028;
     tcp_len = 20 + data_len;
 
     tcp_seg[0] = (unsigned char)(tcp_sport >> 8);
@@ -613,7 +625,7 @@ static int tcp_connect(void)
                 sport = ((unsigned short)rx[34] << 8) | rx[35];
                 dport = ((unsigned short)rx[36] << 8) | rx[37];
 
-                if (sport == net_htons(tcp_dport) && dport == net_htons(tcp_sport)) {
+                if (sport == tcp_dport && dport == tcp_sport) {
                     unsigned char flags = rx[47];
                     if (tcp_state == TCP_STATE_SYN_SENT && (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
                         tcp_seq_remote  = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
@@ -735,7 +747,7 @@ int network_http_get(const char* host, const char* path)
 {
     static unsigned char rx_buf_data[4096];
     static char request[1024];
-    int req_len, i, total;
+    int req_len, i, total = 0;
     int header_done = 0;
     int body_len = 0;
     int in_chunked = 0;
@@ -777,20 +789,20 @@ int network_http_get(const char* host, const char* path)
     req_len = 0;
     {
         const char* method = "GET ";
-        for (i = 0; method[i]; i++) request[req_len++] = method[i];
+        for (i = 0; method[i] && req_len < 1023; i++) request[req_len++] = method[i];
         if (path[0] == 0) {
-            request[req_len++] = '/';
+            if (req_len < 1023) request[req_len++] = '/';
         } else {
-            for (i = 0; path[i]; i++) request[req_len++] = path[i];
+            for (i = 0; path[i] && req_len < 1023; i++) request[req_len++] = path[i];
         }
         {
             const char* http_ver = " HTTP/1.0\r\nHost: ";
-            for (i = 0; http_ver[i]; i++) request[req_len++] = http_ver[i];
+            for (i = 0; http_ver[i] && req_len < 1023; i++) request[req_len++] = http_ver[i];
         }
-        for (i = 0; host[i]; i++) request[req_len++] = host[i];
+        for (i = 0; host[i] && req_len < 1023; i++) request[req_len++] = host[i];
         {
             const char* ending = "\r\nConnection: close\r\n\r\n";
-            for (i = 0; ending[i]; i++) request[req_len++] = ending[i];
+            for (i = 0; ending[i] && req_len < 1023; i++) request[req_len++] = ending[i];
         }
     }
 
