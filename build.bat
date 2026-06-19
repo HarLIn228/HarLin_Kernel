@@ -96,6 +96,8 @@ if errorlevel 1 (
 echo %SUCCESS% Creating disk image
 
 del build\kernel.tmp 2>nul
+del build\asm_*.o 2>nul
+del build\*.o 2>nul
 if exist build\error.log del build\error.log
 
 echo.
