@@ -1,6 +1,7 @@
 #include "interrupt.h"
 #include "io.h"
 #include "screen.h"
+#include "gdt.h"
 
 struct idt_entry {
     unsigned short offset_low;
@@ -76,6 +77,7 @@ extern void irq12_stub(void);
 extern void irq13_stub(void);
 extern void irq14_stub(void);
 extern void irq15_stub(void);
+extern void syscall_stub(void);
 extern void idt_load(struct idt_ptr* ptr);
 
 static void (*irq_handlers[16])(void);
@@ -101,14 +103,15 @@ void idt_init(void)
 {
     int i;
     for (i = 0; i < 256; i++) {
-        idt_set_gate(i, (unsigned long)isr0, 0x18, 0x8E);
+        idt_set_gate(i, (unsigned long)isr0, GDT_KERNEL_CODE, 0x8E);
     }
     for (i = 0; i < 32; i++) {
-        idt_set_gate(i, (unsigned long)isr_stubs[i], 0x18, 0x8E);
+        idt_set_gate(i, (unsigned long)isr_stubs[i], GDT_KERNEL_CODE, 0x8E);
     }
     for (i = 0; i < 16; i++) {
-        idt_set_gate(0x20 + i, (unsigned long)irq_stubs[i], 0x18, 0x8E);
+        idt_set_gate(0x20 + i, (unsigned long)irq_stubs[i], GDT_KERNEL_CODE, 0x8E);
     }
+    idt_set_gate(0x80, (unsigned long)syscall_stub, GDT_KERNEL_CODE, 0xEE);
     idtp.limit = sizeof(idt) - 1;
     idtp.base = (unsigned long)&idt;
     idt_load(&idtp);

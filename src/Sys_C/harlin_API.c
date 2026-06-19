@@ -8,6 +8,11 @@
 #include "vmm.h"
 #include "ata.h"
 #include "partition.h"
+#include "gdt.h"
+#include "cx_loader.h"
+#include "scheduler.h"
+
+extern void screen_put_char(char c);
 
 extern void pic_init(void);
 
@@ -240,7 +245,14 @@ void Harlin_Shutdown(void)
 
 void Harlin_Boot(void)
 {
+    int disk_ok;
+
+    screen_put_char('A');
+    gdt_init();
+    tss_set_rsp0(0x90000);
+    screen_put_char('B');
     idt_init();
+    screen_put_char('C');
     pic_init();
     keyboard_init();
     network_init();
@@ -248,6 +260,7 @@ void Harlin_Boot(void)
 
     Harlin_PmmInit();
     Harlin_VmmInit(0x20000);
+    scheduler_init();
 
     screen_clear();
     Harlin_ConPrint("\n");
@@ -257,8 +270,24 @@ void Harlin_Boot(void)
     Harlin_ConPrint("includes: 1. modifying the kernel implementation, 2. adding new features, and\n");
     Harlin_ConPrint("3. releasing it while complying with the MIT open-source license.\n");
     Harlin_ConPrint("\n");
+    Harlin_ConPrint("This core uses the HarLin_API standard, so developers need to relearn the standard; there's no POSIX here.\n");
+    Harlin_ConPrint("\n");
     Harlin_ConPrint("(C) 2026 HarLin228 Studio\n");
     Harlin_ConPrint("\n");
+
+    {
+        struct Harlin_File init_file;
+        if (Harlin_FsMount(0) == 0 && Harlin_FsOpen("init.cx", &init_file) == 0) {
+            u32 size = Harlin_FsSize(&init_file);
+            void* buf = (void*)Harlin_PmmAlloc();
+            if (buf && size > 0 && size <= 4096 && Harlin_FsRead(&init_file, buf, size) == (int)size) {
+                Harlin_FsClose(&init_file);
+                if (cx_load(buf, size) >= 0) {
+                    schedule();
+                }
+            }
+        }
+    }
 
     for (;;) {
         Harlin_IntOff();

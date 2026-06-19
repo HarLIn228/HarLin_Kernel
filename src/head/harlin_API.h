@@ -10,6 +10,42 @@ typedef signed short       s16;
 typedef signed int         s32;
 typedef signed long long   s64;
 
+#define HARLIN_OK              0
+#define HARLIN_ERROR          -1
+#define HARLIN_INVALID        -2
+#define HARLIN_NO_MEMORY      -3
+#define HARLIN_NOT_FOUND      -4
+#define HARLIN_TIMEOUT        -5
+#define HARLIN_IO_ERROR       -6
+#define HARLIN_UNSUPPORTED    -7
+#define HARLIN_ACCESS_DENIED  -8
+#define HARLIN_BUSY           -9
+
+#define HARLIN_PAGE_SIZE 4096
+#define HARLIN_VMM_PRESENT  0x001
+#define HARLIN_VMM_WRITABLE 0x002
+#define HARLIN_VMM_USER     0x004
+
+#define HARLIN_DISP_VGA_TEXT 0
+#define HARLIN_DISP_VGA_13H  1
+#define HARLIN_DISP_VESA     2
+
+#define HARLIN_FS_OK     0
+#define HARLIN_FS_ERROR -1
+#define HARLIN_FS_EOF   -2
+
+#define HARLIN_SYS_EXIT   0
+#define HARLIN_SYS_PRINT  1
+#define HARLIN_SYS_GETC   2
+#define HARLIN_SYS_ALLOC  3
+#define HARLIN_SYS_FREE   4
+#define HARLIN_SYS_OPEN   5
+#define HARLIN_SYS_READ   6
+#define HARLIN_SYS_CLOSE  7
+#define HARLIN_SYS_EXEC   8
+#define HARLIN_SYS_YIELD  9
+#define HARLIN_SYS_SLEEP  10
+
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
 
@@ -19,10 +55,6 @@ void Harlin_ConPrint(const char* str);
 void Harlin_ConPrintHex(u64 val);
 void Harlin_ConPrintDec(s32 val);
 void Harlin_ConSetColor(u8 fg, u8 bg);
-
-#define HARLIN_DISP_VGA_TEXT 0
-#define HARLIN_DISP_VGA_13H  1
-#define HARLIN_DISP_VESA     2
 
 int  Harlin_DisplaySetMode(int mode);
 void Harlin_DisplayClear(unsigned char color);
@@ -50,14 +82,9 @@ void Harlin_MemSet(void* dst, u8 val, u32 n);
 s32  Harlin_StrToInt(const char* str);
 void Harlin_IntToStr(s32 val, char* buf);
 
-int  Harlin_NetInit(void);
-int  Harlin_HttpGet(const char* host, const char* path);
-int  Harlin_DNS(const char* domain, u8* out_ip);
-
-#define HARLIN_PAGE_SIZE 4096
-#define HARLIN_VMM_PRESENT  0x001
-#define HARLIN_VMM_WRITABLE 0x002
-#define HARLIN_VMM_USER     0x004
+int Harlin_NetInit(void);
+int Harlin_HttpGet(const char* host, const char* path);
+int Harlin_DNS(const char* domain, u8* out_ip);
 
 void Harlin_PmmInit(void);
 u64  Harlin_PmmAlloc(void);
@@ -68,9 +95,9 @@ void Harlin_VmmMap(u64 virt, u64 phys, u64 flags);
 void Harlin_VmmUnmap(u64 virt);
 u64  Harlin_VmmGetPhys(u64 virt);
 
-int  Harlin_DiskInit(void);
-int  Harlin_DiskReadSector(u64 lba, u8 count, void* buf);
-int  Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf);
+int Harlin_DiskInit(void);
+int Harlin_DiskReadSector(u64 lba, u8 count, void* buf);
+int Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf);
 
 struct Harlin_PartitionInfo {
     u8  active;
@@ -89,10 +116,6 @@ struct Harlin_File {
     u32 position;
     u32 size;
 };
-
-#define HARLIN_FS_OK     0
-#define HARLIN_FS_ERROR -1
-#define HARLIN_FS_EOF   -2
 
 int  Harlin_FsMount(u32 partition_lba);
 int  Harlin_FsOpen(const char* name, struct Harlin_File* out);

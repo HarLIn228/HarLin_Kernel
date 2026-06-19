@@ -5,7 +5,7 @@
 
 #define PMM_PAGE_SIZE 4096
 #define PMM_BASE_ADDR 0x300000
-#define PMM_BITMAP_ADDR 0x100000
+#define PMM_BITMAP_ADDR 0x200000
 #define PMM_TOTAL_PAGES 32000
 
 void pmm_init(void);

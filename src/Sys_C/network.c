@@ -45,7 +45,7 @@ static unsigned short tcp_sport = 12345;
 static unsigned short tcp_dport = 80;
 static unsigned int   tcp_seq_local  = 0;
 static unsigned int   tcp_seq_remote = 0;
-static int tcp_state = 0;
+static volatile int tcp_state = 0;
 
 static unsigned char tx_buf[TX_BUF_SIZE] __attribute__((aligned(4)));
 static volatile unsigned char* rx_buf = (volatile unsigned char*)RX_BUF_PHYS;
@@ -203,6 +203,7 @@ static void net_wait_irq(void)
 {
     net_irq_done = 0;
     while (!net_irq_done) {
+        asm volatile ("" : : : "memory");
         sti();
         asm volatile ("hlt");
         cli();
@@ -272,6 +273,7 @@ static int net_wait_packet(unsigned char* buf, int max_len)
         len = rtl_poll_packet(buf, max_len);
         if (len > 0) return len;
         net_irq_done = 0;
+        asm volatile ("" : : : "memory");
         sti();
         asm volatile ("hlt");
         cli();
@@ -846,7 +848,7 @@ int network_http_get(const char* host, const char* path)
             if (!header_done) {
                 if (c == '\n') {
                     if (line_pos > 0 && line_buf[line_pos - 1] == '\r') line_buf[line_pos - 1] = 0;
-                    else line_buf[line_pos] = 0;
+                    else if (line_pos < 1024) line_buf[line_pos] = 0;
 
                     if (line_pos == 0 || (line_pos == 1 && line_buf[0] == '\r')) {
                         header_done = 1;
@@ -858,7 +860,11 @@ int network_http_get(const char* host, const char* path)
                     line_pos = 0;
                     continue;
                 }
-                if (line_pos < 1023) line_buf[line_pos++] = c;
+                if (line_pos >= 1023) {
+                    line_pos = 0;
+                    continue;
+                }
+                line_buf[line_pos++] = c;
             } else {
                 if (in_chunked) {
                     int j;

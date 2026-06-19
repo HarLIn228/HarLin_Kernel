@@ -88,8 +88,9 @@ static int read_cluster(u32 cluster, void* buf)
 
 static int filename_match(const char* name, const u8* entry)
 {
-    char short_name[12];
+    char short_name[13];
     int i;
+    int pos;
 
     if (entry[0] == FAT32_DELETED || entry[0] == 0)
         return 0;
@@ -98,21 +99,17 @@ static int filename_match(const char* name, const u8* entry)
     if ((entry[11] & 0x08) || (entry[11] & 0x10))
         return 0;
 
-    for (i = 0; i < 8; i++) {
-        if (entry[i] == ' ')
-            break;
-        short_name[i] = entry[i];
+    pos = 0;
+    for (i = 0; i < 8 && entry[i] != ' '; i++) {
+        short_name[pos++] = entry[i];
     }
-    short_name[i] = '.';
-    short_name[i + 1] = entry[8];
-    short_name[i + 2] = entry[9];
-    short_name[i + 3] = entry[10];
-    short_name[i + 4] = '\0';
-
-    for (i = 0; short_name[i]; i++) {
-        if (short_name[i] == ' ')
-            short_name[i] = '\0';
+    if (entry[8] != ' ') {
+        short_name[pos++] = '.';
+        short_name[pos++] = entry[8];
+        if (entry[9] != ' ') short_name[pos++] = entry[9];
+        if (entry[10] != ' ') short_name[pos++] = entry[10];
     }
+    short_name[pos] = '\0';
 
     return Harlin_StrCmp(name, short_name) == 0;
 }

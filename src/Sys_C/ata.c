@@ -34,6 +34,7 @@ static int ata_wait_transfer(void)
 {
     ata_irq_done = 0;
     while (!ata_irq_done) {
+        asm volatile ("" : : : "memory");
         sti();
         asm volatile ("hlt");
         cli();
@@ -74,15 +75,17 @@ int ata_init(void)
     return 0;
 }
 
-static int ata_do_sector(u32 lba, u8 cmd)
+static int ata_do_sector(u64 lba, u8 cmd)
 {
+    if (lba > 0x0FFFFFFF)
+        return -1;
     if (ata_wait_bsy() != 0)
         return -1;
-    outb(ata_base + 6, 0xE0 | ((lba >> 24) & 0x0F));
+    outb(ata_base + 6, 0xE0 | (u8)((lba >> 24) & 0x0F));
     outb(ata_base + 2, 1);
-    outb(ata_base + 3, lba & 0xFF);
-    outb(ata_base + 4, (lba >> 8) & 0xFF);
-    outb(ata_base + 5, (lba >> 16) & 0xFF);
+    outb(ata_base + 3, (u8)(lba & 0xFF));
+    outb(ata_base + 4, (u8)((lba >> 8) & 0xFF));
+    outb(ata_base + 5, (u8)((lba >> 16) & 0xFF));
     outb(ata_base + 7, cmd);
     return 0;
 }

@@ -61,17 +61,24 @@ void keyboard_init(void)
 
 int keyboard_has_data(void)
 {
-    return keybuf_head != keybuf_tail;
+    int r;
+    asm volatile ("cli");
+    r = keybuf_head != keybuf_tail;
+    asm volatile ("sti");
+    return r;
 }
 
 unsigned char keyboard_poll(void)
 {
     unsigned char scancode;
+    asm volatile ("cli");
     if (keybuf_head == keybuf_tail) {
+        asm volatile ("sti");
         return 0;
     }
     scancode = keybuf[keybuf_head];
     keybuf_head = (keybuf_head + 1) % KEYBUF_SIZE;
+    asm volatile ("sti");
     return scancode;
 }
 

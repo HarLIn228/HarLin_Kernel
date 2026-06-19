@@ -19,7 +19,7 @@ set ERR=%RED%[Error]%RESET%
 
 set CC=x86_64-w64-mingw32-gcc
 set LD=ld
-set CFLAGS=-ffreestanding -c -m64 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx
+set CFLAGS=-ffreestanding -c -m64 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx -mabi=sysv
 
 if not exist build mkdir build
 
@@ -106,7 +106,6 @@ if /i "%WAIT%"=="Y" goto end
 goto end
 
 :error
-if exist build\error.log del build\error.log
 echo.
 echo %RED%Build failed%RESET%
 exit /b 1
