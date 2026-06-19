@@ -215,15 +215,19 @@ int Harlin_KeyReady(void)
 char Harlin_KeyGet(void)
 {
     unsigned char sc;
-    while (1) {
+    for (;;) {
+        Harlin_IntOff();
         if (keyboard_has_data()) {
             sc = keyboard_poll();
+            Harlin_IntOn();
             if (sc) {
                 char ch = keyboard_scancode_to_ascii(sc);
                 if (ch) return ch;
             }
+        } else {
+            Harlin_IntOn();
+            asm volatile ("hlt");
         }
-        asm volatile ("hlt");
     }
 }
 
@@ -255,9 +259,11 @@ void Harlin_Boot(void)
     Harlin_ConPrint("\n");
     Harlin_ConPrint("(C) 2026 HarLin228 Studio\n");
     Harlin_ConPrint("\n");
+
     for (;;) {
         Harlin_IntOff();
         if (!Harlin_KeyReady()) {
+            Harlin_IntOn();
             asm volatile ("hlt");
         }
         Harlin_IntOn();

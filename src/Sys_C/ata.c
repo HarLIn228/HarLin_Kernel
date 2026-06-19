@@ -1,8 +1,10 @@
 #include "ata.h"
 #include "io.h"
+#include "interrupt.h"
 
 static u16 ata_base = ATA_PRIMARY_BASE;
 static u16 ata_ctrl = ATA_PRIMARY_CTRL;
+static volatile int ata_irq_done = 0;
 
 static u8 ata_status(void)
 {
@@ -22,41 +24,29 @@ static int ata_wait_bsy(void)
     return -1;
 }
 
-static int ata_wait_drdy(void)
+static void ata_irq_handler(void)
 {
-    u32 i;
-    for (i = 0; i < 1000000; i++) {
-        u8 status = ata_status();
-        if (status == 0xFF)
-            return -1;
-        if (status & 0x40)
-            return 0;
-    }
-    return -1;
+    inb(ata_base + 7);
+    ata_irq_done = 1;
 }
 
-static int ata_poll_drq(void)
+static int ata_wait_transfer(void)
 {
-    u32 i;
-    u8 status;
-    for (i = 0; i < 1000000; i++) {
-        status = ata_status();
-        if (status == 0xFF)
-            return -1;
-        if (status & 0x01)
-            return -1;
-        if (status & 0x20)
-            return -1;
-        if ((status & 0x88) == 0x08)
-            return 0;
+    ata_irq_done = 0;
+    while (!ata_irq_done) {
+        sti();
+        asm volatile ("hlt");
+        cli();
     }
-    return -1;
+    return 0;
 }
 
 int ata_init(void)
 {
     u32 i;
     u8 status;
+
+    irq_register(14, ata_irq_handler);
 
     outb(ata_ctrl, 0x04);
     for (i = 0; i < 1000; i++) inb(ata_ctrl);
@@ -73,7 +63,7 @@ int ata_init(void)
         return -1;
 
     outb(ata_base + 7, ATA_CMD_IDENTIFY);
-    if (ata_poll_drq() != 0)
+    if (ata_wait_transfer() != 0)
         return -1;
 
     for (i = 0; i < 256; i++) {
@@ -94,7 +84,7 @@ static int ata_do_sector(u32 lba, u8 cmd)
     outb(ata_base + 4, (lba >> 8) & 0xFF);
     outb(ata_base + 5, (lba >> 16) & 0xFF);
     outb(ata_base + 7, cmd);
-    return ata_poll_drq();
+    return 0;
 }
 
 int ata_read_sectors(u64 lba, u8 count, void* buf)
@@ -108,6 +98,9 @@ int ata_read_sectors(u64 lba, u8 count, void* buf)
 
     for (current = 0; current < count; current++) {
         if (ata_do_sector((u32)(lba + current), ATA_CMD_READ) != 0)
+            return -1;
+
+        if (ata_wait_transfer() != 0)
             return -1;
 
         for (i = 0; i < 256; i++) {
@@ -131,6 +124,9 @@ int ata_write_sectors(u64 lba, u8 count, const void* buf)
 
     for (current = 0; current < count; current++) {
         if (ata_do_sector((u32)(lba + current), ATA_CMD_WRITE) != 0)
+            return -1;
+
+        if (ata_wait_transfer() != 0)
             return -1;
 
         for (i = 0; i < 256; i++) {

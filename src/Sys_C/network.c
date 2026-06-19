@@ -1,6 +1,7 @@
 #include "io.h"
 #include "screen.h"
 #include "network.h"
+#include "interrupt.h"
 
 #define PCI_ADDR 0xCF8
 #define PCI_DATA 0xCFC
@@ -34,6 +35,11 @@ static int gateway_resolved = 0;
 
 static unsigned char local_ip[4]  = {10, 0, 2, 15};
 static unsigned char remote_ip[4] = {0};
+
+static volatile int net_irq_done = 0;
+
+static void net_irq_handler(void);
+static int rtl_poll_packet(unsigned char* buf, int max_len);
 
 static unsigned short tcp_sport = 12345;
 static unsigned short tcp_dport = 80;
@@ -179,16 +185,33 @@ static void rtl_init(void)
 
     outb(io_base + 0x37, 0x0C);
 
-    outw(io_base + 0x3C, 0x0000);
+    outw(io_base + 0x3C, 0x0005);
+
+    irq_register(11, net_irq_handler);
 
     net_putstr("RTL8139 initialized\n");
+}
+
+static void net_irq_handler(void)
+{
+    unsigned short isr = inw(io_base + 0x3E);
+    outw(io_base + 0x3E, isr);
+    net_irq_done = 1;
+}
+
+static void net_wait_irq(void)
+{
+    net_irq_done = 0;
+    while (!net_irq_done) {
+        sti();
+        asm volatile ("hlt");
+        cli();
+    }
 }
 
 static void rtl_send_packet(unsigned char* pkt, int len)
 {
     int i;
-    unsigned int status;
-    int timeout;
     int tx_len;
 
     tx_len = len < 60 ? 60 : len;
@@ -201,38 +224,10 @@ static void rtl_send_packet(unsigned char* pkt, int len)
         tx_buf[i] = 0;
     }
 
-    status = inl(io_base + 0x10);
-    net_putstr("TSD before=");
-    net_putnum(status);
-
     outl(io_base + 0x20, (unsigned int)(unsigned long)tx_buf);
     outl(io_base + 0x10, (unsigned int)(tx_len & 0xFFF));
 
-    status = inl(io_base + 0x10);
-    net_putstr(" after=");
-    net_putnum(status);
-    net_putstr(" len=");
-    net_putnum((unsigned int)len);
-    screen_put_char('\n');
-
-    timeout = 5000000;
-    while (timeout > 0) {
-        status = inl(io_base + 0x10);
-        if (status & 0x2000) break;
-        if (status & 0x8000) {
-            net_putstr("TX abort, TSD=");
-            net_putnum(status);
-            screen_put_char('\n');
-            break;
-        }
-        timeout--;
-    }
-
-    if (timeout == 0) {
-        net_putstr("TX timeout, TSD=");
-        net_putnum(status);
-        screen_put_char('\n');
-    }
+    net_wait_irq();
 }
 
 static int rtl_poll_packet(unsigned char* buf, int max_len)
@@ -269,6 +264,21 @@ static int rtl_poll_packet(unsigned char* buf, int max_len)
     return pkt_len - 4;
 }
 
+static int net_wait_packet(unsigned char* buf, int max_len)
+{
+    int len;
+    int waits;
+    for (waits = 10000; waits > 0; waits--) {
+        len = rtl_poll_packet(buf, max_len);
+        if (len > 0) return len;
+        net_irq_done = 0;
+        sti();
+        asm volatile ("hlt");
+        cli();
+    }
+    return 0;
+}
+
 static int arp_resolve(unsigned char* target_ip)
 {
     unsigned char pkt[64];
@@ -303,7 +313,7 @@ static int arp_resolve(unsigned char* target_ip)
 
     timeout = 5000000;
     while (timeout > 0) {
-        len = rtl_poll_packet(rx, sizeof(rx));
+        len = net_wait_packet(rx, sizeof(rx));
         if (len > 0) {
             if (len >= 42) {
                 op = ((unsigned short)rx[21] << 8) | rx[20];
@@ -447,7 +457,7 @@ int dns_resolve(const char* domain, unsigned char* out_ip)
     timeout = 5000000;
     while (timeout > 0) {
         static unsigned char rx[2048];
-        int len = rtl_poll_packet(rx, sizeof(rx));
+        int len = net_wait_packet(rx, sizeof(rx));
         if (len > 0) {
             arp_respond(rx, len);
 
@@ -616,7 +626,7 @@ static int tcp_connect(void)
     timeout = 10000000;
     while (timeout > 0) {
         static unsigned char rx[2048];
-        int len = rtl_poll_packet(rx, sizeof(rx));
+        int len = net_wait_packet(rx, sizeof(rx));
         if (len > 0) {
             arp_respond(rx, len);
 
@@ -654,7 +664,7 @@ static int tcp_recv_data(unsigned char* buf, int max_len, int timeout_cycles)
 {
     while (timeout_cycles > 0) {
         unsigned char rx[2048];
-        int len = rtl_poll_packet(rx, sizeof(rx));
+        int len = net_wait_packet(rx, sizeof(rx));
         if (len > 0) {
             arp_respond(rx, len);
 

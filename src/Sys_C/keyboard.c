@@ -1,4 +1,5 @@
 #include "io.h"
+#include "interrupt.h"
 
 #define KEYBOARD_DATA_PORT 0x60
 #define KEYBOARD_STATUS_PORT 0x64
@@ -37,22 +38,7 @@ static unsigned char scancode_to_ascii_shift[128] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
-void keyboard_init(void)
-{
-    shift_pressed = 0;
-    keybuf_head = 0;
-    keybuf_tail = 0;
-    while (inb(KEYBOARD_STATUS_PORT) & 0x01) {
-        inb(KEYBOARD_DATA_PORT);
-    }
-}
-
-int keyboard_has_data(void)
-{
-    return keybuf_head != keybuf_tail;
-}
-
-void irq1_handler(void)
+static void keyboard_irq_handler(void)
 {
     unsigned char scancode = inb(KEYBOARD_DATA_PORT);
     int next = (keybuf_tail + 1) % KEYBUF_SIZE;
@@ -62,17 +48,30 @@ void irq1_handler(void)
     }
 }
 
+void keyboard_init(void)
+{
+    shift_pressed = 0;
+    keybuf_head = 0;
+    keybuf_tail = 0;
+    while (inb(KEYBOARD_STATUS_PORT) & 0x01) {
+        inb(KEYBOARD_DATA_PORT);
+    }
+    irq_register(1, keyboard_irq_handler);
+}
+
+int keyboard_has_data(void)
+{
+    return keybuf_head != keybuf_tail;
+}
+
 unsigned char keyboard_poll(void)
 {
     unsigned char scancode;
-    cli();
     if (keybuf_head == keybuf_tail) {
-        sti();
         return 0;
     }
     scancode = keybuf[keybuf_head];
     keybuf_head = (keybuf_head + 1) % KEYBUF_SIZE;
-    sti();
     return scancode;
 }
 

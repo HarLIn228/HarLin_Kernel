@@ -26,17 +26,10 @@ pic_init:
     out 0x21, al
     out 0xA1, al
 
-    mov al, 0xFD
+    mov al, 0xF9
     out 0x21, al
-    mov al, 0xFF
+    mov al, 0xB7
     out 0xA1, al
 
-    pop rax
-    ret
-
-pic_eoi:
-    push rax
-    mov al, 0x20
-    out 0x20, al
     pop rax
     ret
