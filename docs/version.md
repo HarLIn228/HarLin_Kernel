@@ -4,9 +4,9 @@
 ## H26.2（最新）
 
 - 简化 HarLin_API 命名，让 API 更短更易记（如 `Harlin_ConPrint` -> `Harlin_Print`、`Harlin_FsOpen` -> `Harlin_Open`）
-- 将 CX 用户态可执行格式升级为 CXC，魔数改为 `HARLINCXC`
-- 增强 CXC 加载器健壮性：严格校验头部边界、段大小、重定位对齐，失败时自动回滚已映射页面
-- 更新 API 规范和 CXC 格式文档
+- 将 CX 用户态可执行格式升级为 CHC，魔数改为 `HARLINCHC`
+- 增强 CHC 加载器健壮性：严格校验头部边界、段大小、重定位对齐，失败时自动回滚已映射页面
+- 更新 API 规范和 CHC 格式文档
 
 ## H26.1.6
 

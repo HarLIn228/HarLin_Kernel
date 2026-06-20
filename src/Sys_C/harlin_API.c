@@ -10,7 +10,7 @@
 #include "partition.h"
 #include "io.h"
 #include "gdt.h"
-#include "cxc_loader.h"
+#include "chc_loader.h"
 #include "scheduler.h"
 #include "pipe.h"
 

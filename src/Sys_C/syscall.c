@@ -5,7 +5,7 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "fat32.h"
-#include "cxc_loader.h"
+#include "chc_loader.h"
 #include "pipe.h"
 
 #define USER_ADDR_START 0x400000
@@ -235,7 +235,7 @@ static unsigned long sys_exec(struct syscall_regs* r)
         return (unsigned long)-1;
     }
     Harlin_Close(&file);
-    if (cxc_load(buf, size) >= 0) {
+    if (chc_load(buf, size) >= 0) {
         process_exit();
         __builtin_unreachable();
     }

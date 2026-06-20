@@ -1,4 +1,4 @@
-#include "cxc_loader.h"
+#include "chc_loader.h"
 #include "vmm.h"
 #include "pmm.h"
 #include "harlin_API.h"
@@ -9,7 +9,7 @@
 #define USER_STACK_TOP 0x800000
 #define USER_MAX_SIZE  0x100000
 
-struct cxc_header {
+struct chc_header {
     u8  magic[9];
     u8  reserved[7];
     u16 version;
@@ -57,17 +57,17 @@ static int map_user_pages(u64 virt, u64 size, u64 flags, struct process* proc)
     return 0;
 }
 
-static int header_valid(const struct cxc_header* hdr, u64 file_size)
+static int header_valid(const struct chc_header* hdr, u64 file_size)
 {
     u64 total;
 
-    if (!hdr || file_size < CXC_HEADER_SIZE)
+    if (!hdr || file_size < CHC_HEADER_SIZE)
         return 0;
-    if (Harlin_Compare((const char*)hdr->magic, CXC_MAGIC) != 0)
+    if (Harlin_Compare((const char*)hdr->magic, CHC_MAGIC) != 0)
         return 0;
     if (hdr->version != 1)
         return 0;
-    if (hdr->code_offset < CXC_HEADER_SIZE)
+    if (hdr->code_offset < CHC_HEADER_SIZE)
         return 0;
     if (hdr->code_size == 0 || hdr->code_size > USER_MAX_SIZE)
         return 0;
@@ -85,7 +85,7 @@ static int header_valid(const struct cxc_header* hdr, u64 file_size)
         return 0;
 
     if (hdr->data_size > 0) {
-        if (hdr->data_offset < CXC_HEADER_SIZE)
+        if (hdr->data_offset < CHC_HEADER_SIZE)
             return 0;
         total = hdr->data_offset + hdr->data_size;
         if (total < hdr->data_offset || total > file_size)
@@ -93,7 +93,7 @@ static int header_valid(const struct cxc_header* hdr, u64 file_size)
     }
 
     if (hdr->reloc_count > 0) {
-        if (hdr->reloc_offset < CXC_HEADER_SIZE)
+        if (hdr->reloc_offset < CHC_HEADER_SIZE)
             return 0;
         total = hdr->reloc_offset + hdr->reloc_count * 8;
         if (total < hdr->reloc_offset || total > file_size)
@@ -103,9 +103,9 @@ static int header_valid(const struct cxc_header* hdr, u64 file_size)
     return 1;
 }
 
-int cxc_load(const void* file_data, u64 file_size)
+int chc_load(const void* file_data, u64 file_size)
 {
-    const struct cxc_header* hdr = (const struct cxc_header*)file_data;
+    const struct chc_header* hdr = (const struct chc_header*)file_data;
     struct process* proc;
     u64 code_base;
     u64 data_base;

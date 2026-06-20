@@ -55,7 +55,7 @@ cd D:\Code\Code\HarLIn_Boot
 
 - `docs/手册.md`：小白上手指册，包含逐行修改教程与常见坑解决
 - `docs/HarLin_API_Spec.md`：API 规范
-- `docs/HarLin_CXC_Format.md`：.cxc 用户态可执行格式说明
+- `docs/HarLin_CHC_Format.md`：.chc 用户态可执行格式说明
 - `docs/version.md`：版本更新记录
 
 ## 开源协议
