@@ -21,6 +21,11 @@ set CC=x86_64-w64-mingw32-gcc
 set LD=ld
 set CFLAGS=-ffreestanding -c -m64 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx -mabi=sysv
 
+set TOTAL=0
+for %%f in (src\ASM\*.asm) do set /a TOTAL+=1
+for %%f in (src\Sys_C\*.c) do set /a TOTAL+=1
+set COUNT=0
+
 if exist build rmdir /s /q build
 if not exist build mkdir build
 
@@ -31,7 +36,8 @@ if errorlevel 1 (
     type build\error.log
     goto error
 )
-echo %SUCCESS% Compiling boot.asm
+set /a COUNT+=1
+echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling boot.asm
 
 set OBJS=
 for %%f in (src\ASM\*.asm) do (
@@ -44,7 +50,8 @@ for %%f in (src\ASM\*.asm) do (
             type build\error.log
             goto error
         )
-        echo %SUCCESS% Compiling %%f
+        set /a COUNT+=1
+        echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling %%f
         set OBJS=!OBJS! build\asm_!FILENAME!.o
     )
 )
@@ -58,7 +65,8 @@ for %%f in (src\Sys_C\*.c) do (
         type build\error.log
         goto error
     )
-    echo %SUCCESS% Compiling %%f
+    set /a COUNT+=1
+    echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling %%f
     set OBJS=!OBJS! build\!FILENAME!.o
 )
 

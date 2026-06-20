@@ -294,12 +294,9 @@ void Harlin_Boot(void)
 
     Harlin_MemSet(__bss_start, 0, (u32)(__bss_end - __bss_start));
 
-    screen_put_char('A');
     gdt_init();
     tss_set_rsp0(0x90000);
-    screen_put_char('B');
     idt_init();
-    screen_put_char('C');
     pic_init();
     {
         unsigned char reg_b;
@@ -327,20 +324,6 @@ void Harlin_Boot(void)
     scheduler_init();
     timer_init();
     pipe_init();
-
-    Harlin_DisplaySetMode(HARLIN_DISP_VGA_TEXT);
-    screen_clear();
-    Harlin_ConPrint("\n");
-    Harlin_ConPrint("The HarLin\n");
-    Harlin_ConPrint("------------------------\n");
-    Harlin_ConPrint("As an open-source project, HarLin kernel allows third-party development that\n");
-    Harlin_ConPrint("includes: 1. modifying the kernel implementation, 2. adding new features, and\n");
-    Harlin_ConPrint("3. releasing it while complying with the MIT open-source license.\n");
-    Harlin_ConPrint("\n");
-    Harlin_ConPrint("This core uses the HarLin_API standard, so developers need to relearn the standard; there's no POSIX here.\n");
-    Harlin_ConPrint("\n");
-    Harlin_ConPrint("(C) 2026 HarLin228 Studio\n");
-    Harlin_ConPrint("\n");
 
     for (;;) {
         Harlin_IntOn();

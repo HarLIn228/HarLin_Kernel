@@ -53,12 +53,14 @@ static void keyboard_irq_handler(void)
 
 void keyboard_init(void)
 {
+    int flush_count = 0;
     shift_count = 0;
     keybuf_overflow = 0;
     keybuf_head = 0;
     keybuf_tail = 0;
-    while (inb(KEYBOARD_STATUS_PORT) & 0x01) {
+    while ((inb(KEYBOARD_STATUS_PORT) & 0x01) && flush_count < 256) {
         inb(KEYBOARD_DATA_PORT);
+        flush_count++;
     }
     irq_register(1, keyboard_irq_handler);
 }

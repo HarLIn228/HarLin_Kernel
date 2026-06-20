@@ -24,7 +24,7 @@
 - 新增 Harlin_PipeCreate / Read / Write / Ready / Close 用户态 API
 - 修复 sys_pipe_create 返回值设计缺陷，返回管道 ID
 - 修复 harlin_API.c 中 Harlin_FsRead/FsWrite/FsSize/FsClose 重复定义导致的无限递归
-- 内核启动后停留在 The HarLin 页面，作为成功启动标志
+- 内核改为纯黑屏启动，不显示任何输出
 - 修复内核启动后显示模式被 Bootloader VBE 改变的问题，强制回到 VGA 文本模式
 - 移除 Bootloader 默认 VBE 调用，默认以 VGA 文本模式启动
 - 重写 `docs/手册.md` 为小白上手版本，包含逐行修改位置与常见坑解决
