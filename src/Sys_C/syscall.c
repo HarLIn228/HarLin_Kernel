@@ -5,7 +5,7 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "fat32.h"
-#include "cx_loader.h"
+#include "cxc_loader.h"
 #include "pipe.h"
 
 #define USER_ADDR_START 0x400000
@@ -175,7 +175,7 @@ static unsigned long sys_open(struct syscall_regs* r)
         return (unsigned long)-1;
     for (i = 0; i < MAX_OPEN_FILES; i++) {
         if (!file_in_use[i]) {
-            if (Harlin_FsOpen(name, &open_files[i]) == HARLIN_FS_OK) {
+            if (Harlin_Open(name, &open_files[i]) == HARLIN_FS_OK) {
                 file_in_use[i] = 1;
                 return (unsigned long)i;
             }
@@ -194,7 +194,7 @@ static unsigned long sys_read(struct syscall_regs* r)
         return (unsigned long)-1;
     if (!user_ptr_valid((u64)buf, len))
         return (unsigned long)-1;
-    return (unsigned long)Harlin_FsRead(&open_files[fd], buf, len);
+    return (unsigned long)Harlin_Read(&open_files[fd], buf, len);
 }
 
 static unsigned long sys_close(struct syscall_regs* r)
@@ -202,7 +202,7 @@ static unsigned long sys_close(struct syscall_regs* r)
     int fd = (int)r->rdi;
     if (fd < 0 || fd >= MAX_OPEN_FILES || !file_in_use[fd])
         return (unsigned long)-1;
-    Harlin_FsClose(&open_files[fd]);
+    Harlin_Close(&open_files[fd]);
     file_in_use[fd] = 0;
     return 0;
 }
@@ -217,25 +217,25 @@ static unsigned long sys_exec(struct syscall_regs* r)
         return (unsigned long)-1;
     if (!user_ptr_valid((u64)name, 256))
         return (unsigned long)-1;
-    if (Harlin_FsOpen(name, &file) != HARLIN_FS_OK)
+    if (Harlin_Open(name, &file) != HARLIN_FS_OK)
         return (unsigned long)-1;
-    size = Harlin_FsSize(&file);
+    size = Harlin_Size(&file);
     if (size == 0 || size > 4096) {
-        Harlin_FsClose(&file);
+        Harlin_Close(&file);
         return (unsigned long)-1;
     }
     buf = (void*)pmm_alloc();
     if (!buf) {
-        Harlin_FsClose(&file);
+        Harlin_Close(&file);
         return (unsigned long)-1;
     }
-    if (Harlin_FsRead(&file, buf, size) != (int)size) {
+    if (Harlin_Read(&file, buf, size) != (int)size) {
         pmm_free((u64)buf);
-        Harlin_FsClose(&file);
+        Harlin_Close(&file);
         return (unsigned long)-1;
     }
-    Harlin_FsClose(&file);
-    if (cx_load(buf, size) >= 0) {
+    Harlin_Close(&file);
+    if (cxc_load(buf, size) >= 0) {
         process_exit();
         __builtin_unreachable();
     }

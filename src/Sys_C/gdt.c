@@ -40,8 +40,8 @@ void gdt_init(void)
 {
     u64 tss_base;
 
-    Harlin_MemSet((void*)gdt, 0, sizeof(gdt));
-    Harlin_MemSet((void*)&tss, 0, sizeof(tss));
+    Harlin_Fill((void*)gdt, 0, sizeof(gdt));
+    Harlin_Fill((void*)&tss, 0, sizeof(tss));
 
     gdt[0] = 0x0000000000000000;
     gdt[1] = 0x00CF9A000000FFFF;

@@ -55,17 +55,17 @@ typedef signed long long   s64;
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
 
-void Harlin_ConClear(void);
-void Harlin_ConPutChar(char c);
-void Harlin_ConPrint(const char* str);
-void Harlin_ConPrintHex(u64 val);
-void Harlin_ConPrintDec(s32 val);
-void Harlin_ConSetColor(u8 fg, u8 bg);
+void Harlin_Clear(void);
+void Harlin_PutChar(char c);
+void Harlin_Print(const char* str);
+void Harlin_PrintHex(u64 val);
+void Harlin_PrintDec(s32 val);
+void Harlin_SetColor(u8 fg, u8 bg);
 
-int  Harlin_DisplaySetMode(int mode);
-void Harlin_DisplayClear(unsigned char color);
-void Harlin_DisplayPutPixel(int x, int y, unsigned char color);
-void Harlin_DisplayPutString(int x, int y, const char* str, unsigned char color);
+int  Harlin_SetMode(int mode);
+void Harlin_ClearScreen(unsigned char color);
+void Harlin_PutPixel(int x, int y, unsigned char color);
+void Harlin_PutString(int x, int y, const char* str, unsigned char color);
 
 u8   Harlin_PortIn8(u16 port);
 u16  Harlin_PortIn16(u16 port);
@@ -77,45 +77,45 @@ void Harlin_PortOut32(u16 port, u32 data);
 void Harlin_IntOn(void);
 void Harlin_IntOff(void);
 
-int  Harlin_KeyReady(void);
-char Harlin_KeyGet(void);
-int  Harlin_KeyOverflowCount(void);
+int  Harlin_KeyAvail(void);
+char Harlin_GetKey(void);
+int  Harlin_KeyOverflow(void);
 
-u32  Harlin_StrLen(const char* str);
-void Harlin_StrCopy(char* dst, const char* src);
-int  Harlin_StrCmp(const char* a, const char* b);
-void Harlin_MemCopy(void* dst, const void* src, u32 n);
-void Harlin_MemSet(void* dst, u8 val, u32 n);
-s32  Harlin_StrToInt(const char* str);
-void Harlin_IntToStr(s32 val, char* buf);
+u32  Harlin_Len(const char* str);
+void Harlin_CopyStr(char* dst, const char* src);
+int  Harlin_Compare(const char* a, const char* b);
+void Harlin_Copy(void* dst, const void* src, u32 n);
+void Harlin_Fill(void* dst, u8 val, u32 n);
+s32  Harlin_ToInt(const char* str);
+void Harlin_FromInt(s32 val, char* buf);
 
-int Harlin_NetInit(void);
+int Harlin_InitNet(void);
 int Harlin_HttpGet(const char* host, const char* path);
-int Harlin_DNS(const char* domain, u8* out_ip);
+int Harlin_Resolve(const char* domain, u8* out_ip);
 
-void Harlin_PmmInit(void);
-u64  Harlin_PmmAlloc(void);
-void Harlin_PmmFree(u64 addr);
+void Harlin_InitPmm(void);
+u64  Harlin_AllocPage(void);
+void Harlin_FreePage(u64 addr);
 
-void Harlin_VmmInit(u64 pml4_phys);
-void Harlin_VmmMap(u64 virt, u64 phys, u64 flags);
-void Harlin_VmmUnmap(u64 virt);
-u64  Harlin_VmmGetPhys(u64 virt);
+void Harlin_InitVmm(u64 pml4_phys);
+void Harlin_Map(u64 virt, u64 phys, u64 flags);
+void Harlin_Unmap(u64 virt);
+u64  Harlin_ToPhys(u64 virt);
 
-int Harlin_DiskInit(void);
-int Harlin_DiskReadSector(u64 lba, u8 count, void* buf);
-int Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf);
+int Harlin_InitDisk(void);
+int Harlin_ReadSectors(u64 lba, u8 count, void* buf);
+int Harlin_WriteSectors(u64 lba, u8 count, const void* buf);
 
-struct Harlin_PartitionInfo {
+struct Harlin_Part {
     u8  active;
     u8  type;
     u32 start_lba;
     u32 sector_count;
 };
 
-int Harlin_PartitionInit(void);
-int Harlin_PartitionCount(void);
-int Harlin_PartitionGet(int index, struct Harlin_PartitionInfo* out);
+int Harlin_InitPart(void);
+int Harlin_PartCount(void);
+int Harlin_GetPart(int index, struct Harlin_Part* out);
 
 struct Harlin_File {
     u32 start_cluster;
@@ -130,18 +130,18 @@ struct Harlin_Pipe {
     int id;
 };
 
-int  Harlin_FsMount(u32 partition_lba);
-int  Harlin_FsOpen(const char* name, struct Harlin_File* out);
-int  Harlin_FsCreate(const char* name, struct Harlin_File* out);
-int  Harlin_FsRead(struct Harlin_File* file, void* buf, u32 len);
-int  Harlin_FsWrite(struct Harlin_File* file, const void* buf, u32 len);
-u32  Harlin_FsSize(struct Harlin_File* file);
-void Harlin_FsClose(struct Harlin_File* file);
+int  Harlin_Mount(u32 partition_lba);
+int  Harlin_Open(const char* name, struct Harlin_File* out);
+int  Harlin_Create(const char* name, struct Harlin_File* out);
+int  Harlin_Read(struct Harlin_File* file, void* buf, u32 len);
+int  Harlin_Write(struct Harlin_File* file, const void* buf, u32 len);
+u32  Harlin_Size(struct Harlin_File* file);
+void Harlin_Close(struct Harlin_File* file);
 
-int  Harlin_PipeCreate(struct Harlin_Pipe* pipe);
-int  Harlin_PipeRead(struct Harlin_Pipe* pipe, void* buf, u32 len);
-int  Harlin_PipeWrite(struct Harlin_Pipe* pipe, const void* buf, u32 len);
-int  Harlin_PipeReady(struct Harlin_Pipe* pipe);
-void Harlin_PipeClose(struct Harlin_Pipe* pipe);
+int  Harlin_CreatePipe(struct Harlin_Pipe* pipe);
+int  Harlin_ReadPipe(struct Harlin_Pipe* pipe, void* buf, u32 len);
+int  Harlin_WritePipe(struct Harlin_Pipe* pipe, const void* buf, u32 len);
+int  Harlin_ReadyPipe(struct Harlin_Pipe* pipe);
+void Harlin_ClosePipe(struct Harlin_Pipe* pipe);
 
 #endif

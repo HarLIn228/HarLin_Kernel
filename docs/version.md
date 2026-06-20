@@ -1,9 +1,14 @@
 # HarLin Kernel 版本历史
 
-本项目采用 CalVer 版本号，格式为 `YY.D.H`：
+本项目采用 CalVer 版本号，格式为 `YY.D.X`：
+## H26.2（最新）
 
+- 简化 HarLin_API 命名，让 API 更短更易记（如 `Harlin_ConPrint` -> `Harlin_Print`、`Harlin_FsOpen` -> `Harlin_Open`）
+- 将 CX 用户态可执行格式升级为 CXC，魔数改为 `HARLINCXC`
+- 增强 CXC 加载器健壮性：严格校验头部边界、段大小、重定位对齐，失败时自动回滚已映射页面
+- 更新 API 规范和 CXC 格式文档
 
-## H26.1.6（最新）
+## H26.1.6
 
 - 修复 idt_load 汇编函数错误地从栈读取参数的问题，改为从 RDI 寄存器读取
 - 修复因 IDT 未正确加载导致的定时器中断 Triple Fault 崩溃

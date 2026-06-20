@@ -12,6 +12,7 @@
 - 公开的宏使用前缀 `HARLIN_`。
 - 公开的类型使用小写短名：`u8`、`u16`、`u32`、`u64`、`s8`、`s16`、`s32`、`s64`。
 - 常量使用大写和下划线。
+- API 名称追求简短好记，避免晦涩缩写。
 
 ### 2.2 调用约定
 
@@ -56,12 +57,12 @@ typedef signed long long   s64;
 ## 4. 控制台 API
 
 ```c
-void Harlin_ConClear(void);
-void Harlin_ConPutChar(char c);
-void Harlin_ConPrint(const char* str);
-void Harlin_ConPrintHex(u64 val);
-void Harlin_ConPrintDec(s32 val);
-void Harlin_ConSetColor(u8 fg, u8 bg);
+void Harlin_Clear(void);
+void Harlin_PutChar(char c);
+void Harlin_Print(const char* str);
+void Harlin_PrintHex(u64 val);
+void Harlin_PrintDec(s32 val);
+void Harlin_SetColor(u8 fg, u8 bg);
 ```
 
 ## 5. 显示 API
@@ -71,10 +72,10 @@ void Harlin_ConSetColor(u8 fg, u8 bg);
 #define HARLIN_DISP_VGA_13H  1
 #define HARLIN_DISP_VESA     2
 
-int  Harlin_DisplaySetMode(int mode);
-void Harlin_DisplayClear(unsigned char color);
-void Harlin_DisplayPutPixel(int x, int y, unsigned char color);
-void Harlin_DisplayPutString(int x, int y, const char* str, unsigned char color);
+int  Harlin_SetMode(int mode);
+void Harlin_ClearScreen(unsigned char color);
+void Harlin_PutPixel(int x, int y, unsigned char color);
+void Harlin_PutString(int x, int y, const char* str, unsigned char color);
 ```
 
 ## 6. 端口 I/O API
@@ -98,28 +99,29 @@ void Harlin_IntOff(void);
 ## 8. 键盘 API
 
 ```c
-int  Harlin_KeyReady(void);
-char Harlin_KeyGet(void);
+int  Harlin_KeyAvail(void);
+char Harlin_GetKey(void);
+int  Harlin_KeyOverflow(void);
 ```
 
 ## 9. 字符串与内存 API
 
 ```c
-u32  Harlin_StrLen(const char* str);
-void Harlin_StrCopy(char* dst, const char* src);
-int  Harlin_StrCmp(const char* a, const char* b);
-void Harlin_MemCopy(void* dst, const void* src, u32 n);
-void Harlin_MemSet(void* dst, u8 val, u32 n);
-s32  Harlin_StrToInt(const char* str);
-void Harlin_IntToStr(s32 val, char* buf);
+u32  Harlin_Len(const char* str);
+void Harlin_CopyStr(char* dst, const char* src);
+int  Harlin_Compare(const char* a, const char* b);
+void Harlin_Copy(void* dst, const void* src, u32 n);
+void Harlin_Fill(void* dst, u8 val, u32 n);
+s32  Harlin_ToInt(const char* str);
+void Harlin_FromInt(s32 val, char* buf);
 ```
 
 ## 10. 网络 API
 
 ```c
-int Harlin_NetInit(void);
+int Harlin_InitNet(void);
 int Harlin_HttpGet(const char* host, const char* path);
-int Harlin_DNS(const char* domain, u8* out_ip);
+int Harlin_Resolve(const char* domain, u8* out_ip);
 ```
 
 ## 11. 内存管理 API
@@ -130,37 +132,37 @@ int Harlin_DNS(const char* domain, u8* out_ip);
 #define HARLIN_VMM_WRITABLE 0x002
 #define HARLIN_VMM_USER     0x004
 
-void Harlin_PmmInit(void);
-u64  Harlin_PmmAlloc(void);
-void Harlin_PmmFree(u64 addr);
+void Harlin_InitPmm(void);
+u64  Harlin_AllocPage(void);
+void Harlin_FreePage(u64 addr);
 
-void Harlin_VmmInit(u64 pml4_phys);
-void Harlin_VmmMap(u64 virt, u64 phys, u64 flags);
-void Harlin_VmmUnmap(u64 virt);
-u64  Harlin_VmmGetPhys(u64 virt);
+void Harlin_InitVmm(u64 pml4_phys);
+void Harlin_Map(u64 virt, u64 phys, u64 flags);
+void Harlin_Unmap(u64 virt);
+u64  Harlin_ToPhys(u64 virt);
 ```
 
 ## 12. 磁盘 API
 
 ```c
-int Harlin_DiskInit(void);
-int Harlin_DiskReadSector(u64 lba, u8 count, void* buf);
-int Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf);
+int Harlin_InitDisk(void);
+int Harlin_ReadSectors(u64 lba, u8 count, void* buf);
+int Harlin_WriteSectors(u64 lba, u8 count, const void* buf);
 ```
 
 ## 13. 分区 API
 
 ```c
-struct Harlin_PartitionInfo {
+struct Harlin_Part {
     u8  active;
     u8  type;
     u32 start_lba;
     u32 sector_count;
 };
 
-int Harlin_PartitionInit(void);
-int Harlin_PartitionCount(void);
-int Harlin_PartitionGet(int index, struct Harlin_PartitionInfo* out);
+int Harlin_InitPart(void);
+int Harlin_PartCount(void);
+int Harlin_GetPart(int index, struct Harlin_Part* out);
 ```
 
 ## 14. 文件系统 API
@@ -171,27 +173,45 @@ struct Harlin_File {
     u32 current_cluster;
     u32 position;
     u32 size;
+    u32 dir_cluster;
+    u32 dir_offset;
 };
 
 #define HARLIN_FS_OK     0
 #define HARLIN_FS_ERROR -1
 #define HARLIN_FS_EOF   -2
 
-int  Harlin_FsMount(u32 partition_lba);
-int  Harlin_FsOpen(const char* name, struct Harlin_File* out);
-int  Harlin_FsRead(struct Harlin_File* file, void* buf, u32 len);
-u32  Harlin_FsSize(struct Harlin_File* file);
-void Harlin_FsClose(struct Harlin_File* file);
+int  Harlin_Mount(u32 partition_lba);
+int  Harlin_Open(const char* name, struct Harlin_File* out);
+int  Harlin_Create(const char* name, struct Harlin_File* out);
+int  Harlin_Read(struct Harlin_File* file, void* buf, u32 len);
+int  Harlin_Write(struct Harlin_File* file, const void* buf, u32 len);
+u32  Harlin_Size(struct Harlin_File* file);
+void Harlin_Close(struct Harlin_File* file);
 ```
 
-## 15. 系统控制 API
+## 15. 管道 API
+
+```c
+struct Harlin_Pipe {
+    int id;
+};
+
+int  Harlin_CreatePipe(struct Harlin_Pipe* pipe);
+int  Harlin_ReadPipe(struct Harlin_Pipe* pipe, void* buf, u32 len);
+int  Harlin_WritePipe(struct Harlin_Pipe* pipe, const void* buf, u32 len);
+int  Harlin_ReadyPipe(struct Harlin_Pipe* pipe);
+void Harlin_ClosePipe(struct Harlin_Pipe* pipe);
+```
+
+## 16. 系统控制 API
 
 ```c
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
 ```
 
-## 16. 系统调用接口
+## 17. 系统调用接口
 
 用户态程序通过软件中断 0x80 调用内核服务。系统调用号放在 RAX 中，参数遵循 System V AMD64 ABI。
 
@@ -205,17 +225,23 @@ void Harlin_Shutdown(void);
 | 5 | sys_open | 打开文件 |
 | 6 | sys_read | 从文件读取 |
 | 7 | sys_close | 关闭文件 |
-| 8 | sys_exec | 执行 .cx 程序 |
+| 8 | sys_exec | 执行 .cxc 程序 |
 | 9 | sys_yield | 让出 CPU |
 | 10 | sys_sleep | 休眠指定毫秒 |
+| 11 | sys_key_overflow | 获取键盘缓冲区溢出计数 |
+| 12 | sys_pipe_create | 创建管道 |
+| 13 | sys_pipe_read | 从管道读取 |
+| 14 | sys_pipe_write | 向管道写入 |
+| 15 | sys_pipe_close | 关闭管道 |
+| 16 | sys_pipe_ready | 检查管道是否有数据可读 |
 
 完整的系统调用表在内核中定义，并通过 `harlin_API.h` 向用户空间导出。
 
-## 17. 版本管理
+## 18. 版本管理
 
 API 版本跟随内核版本。主版本号仅在发生不兼容的 API 变更时增加，次版本号在向后兼容地增加功能时增加。
 
-## 18. 安全模型
+## 19. 安全模型
 
 - 内核代码和数据运行在 ring 0。
 - 用户进程运行在 ring 3。

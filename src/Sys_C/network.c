@@ -892,8 +892,8 @@ int network_http_get(const char* host, const char* path)
                         continue;
                     }
 
-                    if (Harlin_StrCmp(line_buf, "Transfer-Encoding: chunked") == 0 ||
-                        Harlin_StrCmp(line_buf, "transfer-encoding: chunked") == 0) {
+                    if (Harlin_Compare(line_buf, "Transfer-Encoding: chunked") == 0 ||
+                        Harlin_Compare(line_buf, "transfer-encoding: chunked") == 0) {
                         is_chunked = 1;
                     }
 

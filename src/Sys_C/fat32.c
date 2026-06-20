@@ -58,7 +58,7 @@ static u32 next_cluster(u32 cluster)
     return next;
 }
 
-int Harlin_FsMount(u32 partition_lba)
+int Harlin_Mount(u32 partition_lba)
 {
     fs_partition_lba = partition_lba;
 
@@ -194,10 +194,10 @@ static int filename_match(const char* name, const u8* entry)
     }
     short_name[pos] = '\0';
 
-    return Harlin_StrCmp(name, short_name) == 0;
+    return Harlin_Compare(name, short_name) == 0;
 }
 
-int Harlin_FsOpen(const char* name, struct Harlin_File* out)
+int Harlin_Open(const char* name, struct Harlin_File* out)
 {
     u32 cluster = root_cluster;
     u32 i;
@@ -232,7 +232,7 @@ int Harlin_FsOpen(const char* name, struct Harlin_File* out)
     return HARLIN_FS_ERROR;
 }
 
-int Harlin_FsRead(struct Harlin_File* file, void* buf, u32 len)
+int Harlin_Read(struct Harlin_File* file, void* buf, u32 len)
 {
     u8* dst = (u8*)buf;
     u32 remaining = len;
@@ -257,7 +257,7 @@ int Harlin_FsRead(struct Harlin_File* file, void* buf, u32 len)
         if (read_cluster(file->current_cluster, cluster_buf) != 0)
             return HARLIN_FS_ERROR;
 
-        Harlin_MemCopy(dst, &cluster_buf[cluster_pos], chunk);
+        Harlin_Copy(dst, &cluster_buf[cluster_pos], chunk);
 
         dst += chunk;
         file->position += chunk;
@@ -271,14 +271,14 @@ int Harlin_FsRead(struct Harlin_File* file, void* buf, u32 len)
     return (int)(len - remaining);
 }
 
-u32 Harlin_FsSize(struct Harlin_File* file)
+u32 Harlin_Size(struct Harlin_File* file)
 {
     if (!file)
         return 0;
     return file->size;
 }
 
-void Harlin_FsClose(struct Harlin_File* file)
+void Harlin_Close(struct Harlin_File* file)
 {
     if (file) {
         file->start_cluster = 0;
@@ -342,7 +342,7 @@ static int update_directory_size(struct Harlin_File* file)
     return 0;
 }
 
-int Harlin_FsWrite(struct Harlin_File* file, const void* buf, u32 len)
+int Harlin_Write(struct Harlin_File* file, const void* buf, u32 len)
 {
     const u8* src = (const u8*)buf;
     u32 remaining = len;
@@ -379,7 +379,7 @@ int Harlin_FsWrite(struct Harlin_File* file, const void* buf, u32 len)
                 cluster_buf[i] = 0;
         }
 
-        Harlin_MemCopy(&cluster_buf[cluster_pos], src, chunk);
+        Harlin_Copy(&cluster_buf[cluster_pos], src, chunk);
 
         if (write_cluster(file->current_cluster, cluster_buf) != 0)
             return HARLIN_FS_ERROR;
@@ -480,7 +480,7 @@ static int find_directory_slot(u32* dir_cluster, u32* dir_offset)
     return -1;
 }
 
-int Harlin_FsCreate(const char* name, struct Harlin_File* out)
+int Harlin_Create(const char* name, struct Harlin_File* out)
 {
     u8 short_name[11];
     u32 cluster;
@@ -491,7 +491,7 @@ int Harlin_FsCreate(const char* name, struct Harlin_File* out)
         return HARLIN_FS_ERROR;
     if (make_short_name(name, short_name) != 0)
         return HARLIN_FS_ERROR;
-    if (Harlin_FsOpen(name, &existing) == HARLIN_FS_OK)
+    if (Harlin_Open(name, &existing) == HARLIN_FS_OK)
         return HARLIN_FS_ERROR;
     if (find_directory_slot(&dir_cluster, &dir_offset) != 0)
         return HARLIN_FS_ERROR;

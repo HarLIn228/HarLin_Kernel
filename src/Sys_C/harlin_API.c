@@ -10,7 +10,7 @@
 #include "partition.h"
 #include "io.h"
 #include "gdt.h"
-#include "cx_loader.h"
+#include "cxc_loader.h"
 #include "scheduler.h"
 #include "pipe.h"
 
@@ -37,47 +37,47 @@ void Harlin_PortOut32(u16 port, u32 data) { PortOut32(port, data); }
 void Harlin_IntOn(void)  { IntOn(); }
 void Harlin_IntOff(void) { IntOff(); }
 
-void Harlin_ConClear(void)   { screen_clear(); }
-void Harlin_ConPutChar(char c) { screen_put_char(c); }
+void Harlin_Clear(void)   { screen_clear(); }
+void Harlin_PutChar(char c) { screen_put_char(c); }
 
-void Harlin_ConPrint(const char* str)
+void Harlin_Print(const char* str)
 {
     while (*str) {
         screen_put_char(*str++);
     }
 }
 
-void Harlin_ConPrintHex(u64 val)
+void Harlin_PrintHex(u64 val)
 {
     const char* hex = "0123456789ABCDEF";
     int i;
-    Harlin_ConPutChar('0');
-    Harlin_ConPutChar('x');
+    Harlin_PutChar('0');
+    Harlin_PutChar('x');
     for (i = 60; i >= 0; i -= 4) {
-        Harlin_ConPutChar(hex[(val >> i) & 0xF]);
+        Harlin_PutChar(hex[(val >> i) & 0xF]);
     }
 }
 
-void Harlin_ConPrintDec(s32 val)
+void Harlin_PrintDec(s32 val)
 {
     char buf[12];
     int i = 0;
     if (val == 0) {
-        Harlin_ConPutChar('0');
+        Harlin_PutChar('0');
         return;
     }
     if (val < 0) {
-        Harlin_ConPutChar('-');
+        Harlin_PutChar('-');
         val = (s32)((u32)(-(val + 1)) + 1);
     }
     while ((u32)val > 0) {
         buf[i++] = '0' + ((u32)val % 10);
         val = (s32)((u32)val / 10);
     }
-    while (i > 0) Harlin_ConPutChar(buf[--i]);
+    while (i > 0) Harlin_PutChar(buf[--i]);
 }
 
-void Harlin_ConSetColor(u8 fg, u8 bg)
+void Harlin_SetColor(u8 fg, u8 bg)
 {
     int i;
     u16 attr;
@@ -88,20 +88,20 @@ void Harlin_ConSetColor(u8 fg, u8 bg)
     }
 }
 
-u32 Harlin_StrLen(const char* str)
+u32 Harlin_Len(const char* str)
 {
     const char* p = str;
     while (*p) p++;
     return (u32)(p - str);
 }
 
-void Harlin_StrCopy(char* dst, const char* src)
+void Harlin_CopyStr(char* dst, const char* src)
 {
     while (*src) *dst++ = *src++;
     *dst = 0;
 }
 
-int Harlin_StrCmp(const char* a, const char* b)
+int Harlin_Compare(const char* a, const char* b)
 {
     while (*a && *b) {
         if (*a != *b) return *a - *b;
@@ -111,7 +111,7 @@ int Harlin_StrCmp(const char* a, const char* b)
     return *a - *b;
 }
 
-void Harlin_MemCopy(void* dst, const void* src, u32 n)
+void Harlin_Copy(void* dst, const void* src, u32 n)
 {
     u32 i;
     unsigned char* d = (unsigned char*)dst;
@@ -119,14 +119,14 @@ void Harlin_MemCopy(void* dst, const void* src, u32 n)
     for (i = 0; i < n; i++) d[i] = s[i];
 }
 
-void Harlin_MemSet(void* dst, u8 val, u32 n)
+void Harlin_Fill(void* dst, u8 val, u32 n)
 {
     u32 i;
     unsigned char* d = (unsigned char*)dst;
     for (i = 0; i < n; i++) d[i] = val;
 }
 
-s32 Harlin_StrToInt(const char* str)
+s32 Harlin_ToInt(const char* str)
 {
     s32 val = 0;
     int sign = 1;
@@ -138,7 +138,7 @@ s32 Harlin_StrToInt(const char* str)
     return val * sign;
 }
 
-void Harlin_IntToStr(s32 val, char* buf)
+void Harlin_FromInt(s32 val, char* buf)
 {
     int i = 0, j;
     char tmp[12];
@@ -155,27 +155,27 @@ void Harlin_IntToStr(s32 val, char* buf)
     *buf = 0;
 }
 
-int Harlin_NetInit(void)   { return network_init(); }
+int Harlin_InitNet(void)   { return network_init(); }
 int Harlin_HttpGet(const char* host, const char* path) { return network_http_get(host, path); }
-int Harlin_DNS(const char* domain, u8* out_ip)          { return dns_resolve(domain, out_ip); }
+int Harlin_Resolve(const char* domain, u8* out_ip)          { return dns_resolve(domain, out_ip); }
 
-void Harlin_PmmInit(void) { pmm_init(); }
-u64  Harlin_PmmAlloc(void) { return pmm_alloc(); }
-void Harlin_PmmFree(u64 addr) { pmm_free(addr); }
+void Harlin_InitPmm(void) { pmm_init(); }
+u64  Harlin_AllocPage(void) { return pmm_alloc(); }
+void Harlin_FreePage(u64 addr) { pmm_free(addr); }
 
-void Harlin_VmmInit(u64 pml4_phys) { vmm_init(pml4_phys); }
-void Harlin_VmmMap(u64 virt, u64 phys, u64 flags) { vmm_map(virt, phys, flags); }
-void Harlin_VmmUnmap(u64 virt) { vmm_unmap(virt); }
-u64  Harlin_VmmGetPhys(u64 virt) { return vmm_get_phys(virt); }
+void Harlin_InitVmm(u64 pml4_phys) { vmm_init(pml4_phys); }
+void Harlin_Map(u64 virt, u64 phys, u64 flags) { vmm_map(virt, phys, flags); }
+void Harlin_Unmap(u64 virt) { vmm_unmap(virt); }
+u64  Harlin_ToPhys(u64 virt) { return vmm_get_phys(virt); }
 
-int Harlin_DiskInit(void) { return ata_init(); }
-int Harlin_DiskReadSector(u64 lba, u8 count, void* buf) { return ata_read_sectors(lba, count, buf); }
-int Harlin_DiskWriteSector(u64 lba, u8 count, const void* buf) { return ata_write_sectors(lba, count, buf); }
+int Harlin_InitDisk(void) { return ata_init(); }
+int Harlin_ReadSectors(u64 lba, u8 count, void* buf) { return ata_read_sectors(lba, count, buf); }
+int Harlin_WriteSectors(u64 lba, u8 count, const void* buf) { return ata_write_sectors(lba, count, buf); }
 
-int Harlin_PartitionInit(void) { return partition_init(); }
-int Harlin_PartitionCount(void) { return partition_count(); }
+int Harlin_InitPart(void) { return partition_init(); }
+int Harlin_PartCount(void) { return partition_count(); }
 
-int Harlin_PartitionGet(int index, struct Harlin_PartitionInfo* out)
+int Harlin_GetPart(int index, struct Harlin_Part* out)
 {
     struct partition_entry entry;
     if (partition_get(index, &entry) != 0)
@@ -189,27 +189,27 @@ int Harlin_PartitionGet(int index, struct Harlin_PartitionInfo* out)
     return 0;
 }
 
-int Harlin_DisplaySetMode(int mode)
+int Harlin_SetMode(int mode)
 {
     return display_set_mode(mode);
 }
 
-void Harlin_DisplayClear(unsigned char color)
+void Harlin_ClearScreen(unsigned char color)
 {
     display_clear(color);
 }
 
-void Harlin_DisplayPutPixel(int x, int y, unsigned char color)
+void Harlin_PutPixel(int x, int y, unsigned char color)
 {
     display_put_pixel(x, y, color);
 }
 
-void Harlin_DisplayPutString(int x, int y, const char* str, unsigned char color)
+void Harlin_PutString(int x, int y, const char* str, unsigned char color)
 {
     display_put_string(x, y, str, color);
 }
 
-int Harlin_PipeCreate(struct Harlin_Pipe* pipe)
+int Harlin_CreatePipe(struct Harlin_Pipe* pipe)
 {
     int id;
     if (!pipe)
@@ -221,28 +221,28 @@ int Harlin_PipeCreate(struct Harlin_Pipe* pipe)
     return 0;
 }
 
-int Harlin_PipeRead(struct Harlin_Pipe* pipe, void* buf, u32 len)
+int Harlin_ReadPipe(struct Harlin_Pipe* pipe, void* buf, u32 len)
 {
     if (!pipe)
         return -1;
     return pipe_read(pipe->id, buf, len);
 }
 
-int Harlin_PipeWrite(struct Harlin_Pipe* pipe, const void* buf, u32 len)
+int Harlin_WritePipe(struct Harlin_Pipe* pipe, const void* buf, u32 len)
 {
     if (!pipe)
         return -1;
     return pipe_write(pipe->id, buf, len);
 }
 
-int Harlin_PipeReady(struct Harlin_Pipe* pipe)
+int Harlin_ReadyPipe(struct Harlin_Pipe* pipe)
 {
     if (!pipe)
         return 0;
     return pipe_ready(pipe->id);
 }
 
-void Harlin_PipeClose(struct Harlin_Pipe* pipe)
+void Harlin_ClosePipe(struct Harlin_Pipe* pipe)
 {
     if (!pipe)
         return;
@@ -250,17 +250,17 @@ void Harlin_PipeClose(struct Harlin_Pipe* pipe)
     pipe->id = -1;
 }
 
-int Harlin_KeyReady(void)
+int Harlin_KeyAvail(void)
 {
     return keyboard_has_data();
 }
 
-int Harlin_KeyOverflowCount(void)
+int Harlin_KeyOverflow(void)
 {
     return keyboard_overflow_count();
 }
 
-char Harlin_KeyGet(void)
+char Harlin_GetKey(void)
 {
     unsigned char sc;
     for (;;) {
@@ -281,7 +281,7 @@ char Harlin_KeyGet(void)
 
 void Harlin_Shutdown(void)
 {
-    Harlin_ConPrint("System halted.\n");
+    Harlin_Print("System halted.\n");
     Harlin_IntOff();
     for (;;) asm volatile ("hlt");
 }
@@ -292,7 +292,7 @@ void Harlin_Boot(void)
     extern char __bss_end[];
     int disk_ok;
 
-    Harlin_MemSet(__bss_start, 0, (u32)(__bss_end - __bss_start));
+    Harlin_Fill(__bss_start, 0, (u32)(__bss_end - __bss_start));
 
     gdt_init();
     tss_set_rsp0(0x90000);
@@ -319,8 +319,8 @@ void Harlin_Boot(void)
     keyboard_init();
     interrupts_enable();
 
-    Harlin_PmmInit();
-    Harlin_VmmInit(0x20000);
+    Harlin_InitPmm();
+    Harlin_InitVmm(0x20000);
     scheduler_init();
     timer_init();
     pipe_init();
