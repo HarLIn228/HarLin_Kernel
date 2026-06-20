@@ -3,6 +3,7 @@
 本项目采用 CalVer 版本号，格式为 `YY.D.X`：
 ## H26.2（最新）
 
+- 大版本发布：内核启动崩溃 bug 已修复，API 与可执行格式完成重构
 - 简化 HarLin_API 命名，让 API 更短更易记（如 `Harlin_ConPrint` -> `Harlin_Print`、`Harlin_FsOpen` -> `Harlin_Open`）
 - 将 CX 用户态可执行格式升级为 CHC，魔数改为 `HARLINCHC`
 - 增强 CHC 加载器健壮性：严格校验头部边界、段大小、重定位对齐，失败时自动回滚已映射页面
