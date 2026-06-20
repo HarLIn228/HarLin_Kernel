@@ -8,6 +8,7 @@
 #include "vmm.h"
 #include "ata.h"
 #include "partition.h"
+#include "io.h"
 #include "gdt.h"
 #include "cx_loader.h"
 #include "scheduler.h"
@@ -41,7 +42,6 @@ void Harlin_ConPutChar(char c) { screen_put_char(c); }
 void Harlin_ConPrint(const char* str)
 {
     while (*str) {
-        __asm__ volatile ("outb %0, $0xE9" : : "a"(*str));
         screen_put_char(*str++);
     }
 }
@@ -78,17 +78,13 @@ void Harlin_ConPrintDec(s32 val)
 
 void Harlin_ConSetColor(u8 fg, u8 bg)
 {
-    u16 pos, attr;
-    u8 lo, hi;
-    pos = 80 * 25;
-    attr = ((bg & 0x0F) << 4) | (fg & 0x0F);
-    lo = (u8)(pos & 0xFF);
-    hi = (u8)((pos >> 8) & 0xFF);
-    PortOut8(0x3D4, 0x0F);
-    PortOut8(0x3D5, lo);
-    PortOut8(0x3D4, 0x0E);
-    PortOut8(0x3D5, hi);
-    PortOut8(0x3D5, (u8)(attr));
+    int i;
+    u16 attr;
+    volatile u16* vga = (volatile u16*)0xB8000;
+    attr = (u16)(((bg & 0x0F) << 4) | (fg & 0x0F));
+    for (i = 0; i < 80 * 25; i++) {
+        vga[i] = (vga[i] & 0x00FF) | (attr << 8);
+    }
 }
 
 u32 Harlin_StrLen(const char* str)
@@ -217,6 +213,11 @@ int Harlin_KeyReady(void)
     return keyboard_has_data();
 }
 
+int Harlin_KeyOverflowCount(void)
+{
+    return keyboard_overflow_count();
+}
+
 char Harlin_KeyGet(void)
 {
     unsigned char sc;
@@ -245,7 +246,11 @@ void Harlin_Shutdown(void)
 
 void Harlin_Boot(void)
 {
+    extern char __bss_start[];
+    extern char __bss_end[];
     int disk_ok;
+
+    Harlin_MemSet(__bss_start, 0, (u32)(__bss_end - __bss_start));
 
     screen_put_char('A');
     gdt_init();
@@ -254,6 +259,24 @@ void Harlin_Boot(void)
     idt_init();
     screen_put_char('C');
     pic_init();
+    {
+        unsigned char reg_b;
+        outb(0x70, 0x0B);
+        reg_b = inb(0x71);
+        outb(0x70, 0x0B);
+        outb(0x71, reg_b & ~0x70);
+        outb(0x70, 0x0C);
+        inb(0x71);
+    }
+    {
+        unsigned long apic_base_low, apic_base_high;
+        asm volatile ("rdmsr" : "=a"(apic_base_low), "=d"(apic_base_high) : "c"(0x1B));
+        if (apic_base_low & (1UL << 11)) {
+            apic_base_low &= ~(1UL << 11);
+            asm volatile ("wrmsr" : : "a"(apic_base_low), "d"(apic_base_high), "c"(0x1B));
+        }
+    }
+    outb(0x21, inb(0x21) | 0x04);
     keyboard_init();
     network_init();
     interrupts_enable();
@@ -261,6 +284,7 @@ void Harlin_Boot(void)
     Harlin_PmmInit();
     Harlin_VmmInit(0x20000);
     scheduler_init();
+    timer_init();
 
     screen_clear();
     Harlin_ConPrint("\n");
@@ -277,7 +301,21 @@ void Harlin_Boot(void)
 
     {
         struct Harlin_File init_file;
-        if (Harlin_FsMount(0) == 0 && Harlin_FsOpen("init.cx", &init_file) == 0) {
+        u32 mount_lba = 0;
+        int i;
+
+        Harlin_DiskInit();
+        Harlin_PartitionInit();
+
+        for (i = 0; i < 4; i++) {
+            struct partition_entry part;
+            if (partition_get(i, &part) == 0 && part.type == PARTITION_TYPE_FAT32) {
+                mount_lba = part.start_lba;
+                break;
+            }
+        }
+
+        if (Harlin_FsMount(mount_lba) == 0 && Harlin_FsOpen("init.cx", &init_file) == 0) {
             u32 size = Harlin_FsSize(&init_file);
             void* buf = (void*)Harlin_PmmAlloc();
             if (buf && size > 0 && size <= 4096 && Harlin_FsRead(&init_file, buf, size) == (int)size) {

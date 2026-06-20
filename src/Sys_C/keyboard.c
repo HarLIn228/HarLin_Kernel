@@ -11,10 +11,11 @@
 
 #define KEYBUF_SIZE 256
 
-static int shift_pressed = 0;
+static int shift_count = 0;
 static volatile unsigned char keybuf[KEYBUF_SIZE];
 static volatile int keybuf_head = 0;
 static volatile int keybuf_tail = 0;
+static volatile int keybuf_overflow = 0;
 
 static unsigned char scancode_to_ascii[128] = {
     0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 0, 0,
@@ -45,12 +46,15 @@ static void keyboard_irq_handler(void)
     if (next != keybuf_head) {
         keybuf[keybuf_tail] = scancode;
         keybuf_tail = next;
+    } else {
+        keybuf_overflow++;
     }
 }
 
 void keyboard_init(void)
 {
-    shift_pressed = 0;
+    shift_count = 0;
+    keybuf_overflow = 0;
     keybuf_head = 0;
     keybuf_tail = 0;
     while (inb(KEYBOARD_STATUS_PORT) & 0x01) {
@@ -62,38 +66,46 @@ void keyboard_init(void)
 int keyboard_has_data(void)
 {
     int r;
-    asm volatile ("cli");
+    unsigned long long flags;
+    asm volatile ("pushf; pop %0; cli" : "=r"(flags) : : "memory");
     r = keybuf_head != keybuf_tail;
-    asm volatile ("sti");
+    asm volatile ("push %0; popf" : : "r"(flags) : "memory");
     return r;
 }
 
 unsigned char keyboard_poll(void)
 {
     unsigned char scancode;
-    asm volatile ("cli");
+    unsigned long long flags;
+    asm volatile ("pushf; pop %0; cli" : "=r"(flags) : : "memory");
     if (keybuf_head == keybuf_tail) {
-        asm volatile ("sti");
+        asm volatile ("push %0; popf" : : "r"(flags) : "memory");
         return 0;
     }
     scancode = keybuf[keybuf_head];
     keybuf_head = (keybuf_head + 1) % KEYBUF_SIZE;
-    asm volatile ("sti");
+    asm volatile ("push %0; popf" : : "r"(flags) : "memory");
     return scancode;
+}
+
+int keyboard_overflow_count(void)
+{
+    return keybuf_overflow;
 }
 
 char keyboard_scancode_to_ascii(unsigned char scancode)
 {
     if (scancode == SC_LSHIFT || scancode == SC_RSHIFT) {
-        shift_pressed = 1;
+        shift_count++;
         return 0;
     }
     if (scancode == SC_LSHIFT_REL || scancode == SC_RSHIFT_REL) {
-        shift_pressed = 0;
+        if (shift_count > 0)
+            shift_count--;
         return 0;
     }
     if (scancode >= 128) return 0;
-    if (shift_pressed) {
+    if (shift_count > 0) {
         return scancode_to_ascii_shift[scancode];
     }
     return scancode_to_ascii[scancode];

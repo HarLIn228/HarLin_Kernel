@@ -48,8 +48,8 @@ void gdt_init(void)
     gdt[2] = 0x00CF92000000FFFF;
     gdt[3] = 0x00AF9A000000FFFF;
     gdt[4] = 0x0000920000000000;
-    gdt[5] = 0x008FFA000000FFFF;
-    gdt[6] = 0x008FF2000000FFFF;
+    gdt[5] = 0x00AFFA000000FFFF;
+    gdt[6] = 0x00AFF2000000FFFF;
 
     tss_base = (u64)&tss;
     gdt[7] = 0x0000890000000000 | (sizeof(tss) - 1) | ((tss_base & 0xFFFFFF) << 16);

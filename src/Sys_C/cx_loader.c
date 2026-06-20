@@ -1,7 +1,7 @@
 #include "cx_loader.h"
 #include "vmm.h"
 #include "pmm.h"
-#include "string.h"
+#include "harlin_API.h"
 #include "gdt.h"
 #include "scheduler.h"
 
@@ -26,15 +26,27 @@ struct cx_header {
 
 extern void jump_to_user(u64 rip, u64 rsp, u64 rdi);
 
-static int map_user_pages(u64 virt, u64 size, u64 flags)
+static int map_user_pages(u64 virt, u64 size, u64 flags, struct process* proc)
 {
     u64 pages = (size + 4095) / 4096;
     u64 i;
+    u64 phys;
     for (i = 0; i < pages; i++) {
-        u64 phys = pmm_alloc();
-        if (!phys)
+        phys = pmm_alloc();
+        if (!phys) {
+            while (i > 0) {
+                i--;
+                phys = vmm_get_phys(virt + i * 4096);
+                vmm_unmap(virt + i * 4096);
+                if (phys) pmm_free(phys);
+            }
             return -1;
+        }
         vmm_map(virt + i * 4096, phys, flags);
+        if (proc && proc->page_count < 16) {
+            proc->user_vaddrs[proc->page_count] = virt + i * 4096;
+            proc->user_pages[proc->page_count++] = phys;
+        }
     }
     return 0;
 }
@@ -45,7 +57,7 @@ static int header_valid(const struct cx_header* hdr, u64 file_size)
 
     if (file_size < CX_HEADER_SIZE)
         return 0;
-    if (str_cmp((const char*)hdr->magic, CX_MAGIC) != 0)
+    if (Harlin_StrCmp((const char*)hdr->magic, CX_MAGIC) != 0)
         return 0;
     if (hdr->version != 1)
         return 0;
@@ -82,6 +94,7 @@ static int header_valid(const struct cx_header* hdr, u64 file_size)
 int cx_load(const void* file_data, u64 file_size)
 {
     const struct cx_header* hdr = (const struct cx_header*)file_data;
+    struct process* proc;
     u64 code_base;
     u64 data_base;
     u64 bss_base;
@@ -91,27 +104,31 @@ int cx_load(const void* file_data, u64 file_size)
     if (!header_valid(hdr, file_size))
         return -1;
 
+    proc = process_current();
+    if (!proc)
+        return -1;
+
     code_base = USER_CODE_BASE;
     data_base = code_base + ((hdr->code_size + 4095) & ~4095);
     bss_base = data_base + ((hdr->data_size + 4095) & ~4095);
 
-    if (map_user_pages(code_base, hdr->code_size, VMM_PRESENT | VMM_USER) != 0)
+    if (map_user_pages(code_base, hdr->code_size, VMM_PRESENT | VMM_USER, proc) != 0)
         return -1;
     if (hdr->data_size > 0) {
-        if (map_user_pages(data_base, hdr->data_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER) != 0)
+        if (map_user_pages(data_base, hdr->data_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER, proc) != 0)
             return -1;
     }
     if (hdr->bss_size > 0) {
-        if (map_user_pages(bss_base, hdr->bss_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER) != 0)
+        if (map_user_pages(bss_base, hdr->bss_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER, proc) != 0)
             return -1;
     }
     if (hdr->stack_size > 0) {
         stack_bottom = USER_STACK_TOP - ((hdr->stack_size + 4095) & ~4095);
-        if (map_user_pages(stack_bottom, hdr->stack_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER) != 0)
+        if (map_user_pages(stack_bottom, hdr->stack_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER, proc) != 0)
             return -1;
     } else {
         stack_bottom = USER_STACK_TOP - 4096;
-        if (map_user_pages(stack_bottom, 4096, VMM_PRESENT | VMM_WRITABLE | VMM_USER) != 0)
+        if (map_user_pages(stack_bottom, 4096, VMM_PRESENT | VMM_WRITABLE | VMM_USER, proc) != 0)
             return -1;
     }
 
@@ -123,6 +140,8 @@ int cx_load(const void* file_data, u64 file_size)
 
     for (i = 0; i < hdr->reloc_count; i++) {
         u64 offset = ((const u64*)((const u8*)file_data + hdr->reloc_offset))[i];
+        if (offset & 7)
+            return -1;
         if (offset + 8 > hdr->code_size)
             return -1;
         *(u64*)(code_base + offset) += code_base;

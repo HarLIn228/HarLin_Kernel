@@ -14,12 +14,18 @@ struct process {
     u64 rsp;
     u64 rflags;
     int state;
+    u64 user_pages[16];
+    u64 user_vaddrs[16];
+    int page_count;
+    u64 next_alloc_virt;
 };
 
 void scheduler_init(void);
 int  process_create(u64 rip, u64 rsp);
 void schedule(void);
-void process_exit(void);
+void process_exit(void) __attribute__((noreturn));
 struct process* process_current(void);
+void timer_init(void);
+void timer_handler(unsigned long* frame);
 
 #endif

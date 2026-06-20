@@ -43,8 +43,9 @@ typedef signed long long   s64;
 #define HARLIN_SYS_READ   6
 #define HARLIN_SYS_CLOSE  7
 #define HARLIN_SYS_EXEC   8
-#define HARLIN_SYS_YIELD  9
-#define HARLIN_SYS_SLEEP  10
+#define HARLIN_SYS_YIELD        9
+#define HARLIN_SYS_SLEEP        10
+#define HARLIN_SYS_KEYOVERFLOW  11
 
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
@@ -73,6 +74,7 @@ void Harlin_IntOff(void);
 
 int  Harlin_KeyReady(void);
 char Harlin_KeyGet(void);
+int  Harlin_KeyOverflowCount(void);
 
 u32  Harlin_StrLen(const char* str);
 void Harlin_StrCopy(char* dst, const char* src);

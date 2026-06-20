@@ -32,12 +32,14 @@ static void ata_irq_handler(void)
 
 static int ata_wait_transfer(void)
 {
+    u32 timeout = 10000000;
     ata_irq_done = 0;
-    while (!ata_irq_done) {
-        asm volatile ("" : : : "memory");
-        sti();
-        asm volatile ("hlt");
-        cli();
+    while (!ata_irq_done && timeout--) {
+        asm volatile ("hlt" : : : "memory");
+    }
+    if (!ata_irq_done) {
+        inb(ata_base + 7);
+        return -1;
     }
     return 0;
 }
@@ -100,7 +102,7 @@ int ata_read_sectors(u64 lba, u8 count, void* buf)
         return 0;
 
     for (current = 0; current < count; current++) {
-        if (ata_do_sector((u32)(lba + current), ATA_CMD_READ) != 0)
+        if (ata_do_sector(lba + current, ATA_CMD_READ) != 0)
             return -1;
 
         if (ata_wait_transfer() != 0)
@@ -126,7 +128,7 @@ int ata_write_sectors(u64 lba, u8 count, const void* buf)
         return 0;
 
     for (current = 0; current < count; current++) {
-        if (ata_do_sector((u32)(lba + current), ATA_CMD_WRITE) != 0)
+        if (ata_do_sector(lba + current, ATA_CMD_WRITE) != 0)
             return -1;
 
         if (ata_wait_transfer() != 0)
@@ -136,7 +138,6 @@ int ata_write_sectors(u64 lba, u8 count, const void* buf)
             outw(ata_base, ptr[current * 256 + i]);
         }
 
-        outb(ata_base + 7, 0xE7);
         ata_wait_bsy();
     }
 

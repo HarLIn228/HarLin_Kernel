@@ -21,6 +21,7 @@ set CC=x86_64-w64-mingw32-gcc
 set LD=ld
 set CFLAGS=-ffreestanding -c -m64 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx -mabi=sysv
 
+if exist build rmdir /s /q build
 if not exist build mkdir build
 
 nasm -f bin src\ASM\boot.asm -o build\boot.bin 2>build\error.log
@@ -103,9 +104,7 @@ if exist build\error.log del build\error.log
 echo.
 echo %GREEN%Build successful%RESET%
 echo.
-set /p WAIT=Press Y to exit...
-if /i "%WAIT%"=="Y" goto end
-goto end
+exit /b 0
 
 :error
 echo.

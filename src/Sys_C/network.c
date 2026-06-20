@@ -2,6 +2,7 @@
 #include "screen.h"
 #include "network.h"
 #include "interrupt.h"
+#include "pmm.h"
 
 #define PCI_ADDR 0xCF8
 #define PCI_DATA 0xCFC
@@ -47,7 +48,6 @@ static unsigned int   tcp_seq_local  = 0;
 static unsigned int   tcp_seq_remote = 0;
 static volatile int tcp_state = 0;
 
-static unsigned char tx_buf[TX_BUF_SIZE] __attribute__((aligned(4)));
 static volatile unsigned char* rx_buf = (volatile unsigned char*)RX_BUF_PHYS;
 
 static void net_putstr(const char* s)
@@ -201,23 +201,32 @@ static void net_irq_handler(void)
 
 static void net_wait_irq(void)
 {
+    unsigned int timeout = 10000000;
     net_irq_done = 0;
-    while (!net_irq_done) {
-        asm volatile ("" : : : "memory");
-        sti();
-        asm volatile ("hlt");
-        cli();
+    while (!net_irq_done && timeout--) {
+        asm volatile ("hlt" : : : "memory");
+    }
+    if (!net_irq_done) {
+        inw(io_base + 0x3E);
     }
 }
 
 static void rtl_send_packet(unsigned char* pkt, int len)
 {
+    unsigned char* tx_buf;
+    unsigned long phys;
     int i;
     int tx_len;
 
     tx_len = len < 60 ? 60 : len;
 
     if (len > TX_BUF_SIZE) len = TX_BUF_SIZE;
+
+    phys = pmm_alloc();
+    if (!phys)
+        return;
+    tx_buf = (unsigned char*)phys;
+
     for (i = 0; i < len; i++) {
         tx_buf[i] = pkt[i];
     }
@@ -225,10 +234,12 @@ static void rtl_send_packet(unsigned char* pkt, int len)
         tx_buf[i] = 0;
     }
 
-    outl(io_base + 0x20, (unsigned int)(unsigned long)tx_buf);
+    outl(io_base + 0x20, (unsigned int)phys);
     outl(io_base + 0x10, (unsigned int)(tx_len & 0xFFF));
 
     net_wait_irq();
+
+    pmm_free(phys);
 }
 
 static int rtl_poll_packet(unsigned char* buf, int max_len)
@@ -273,10 +284,7 @@ static int net_wait_packet(unsigned char* buf, int max_len)
         len = rtl_poll_packet(buf, max_len);
         if (len > 0) return len;
         net_irq_done = 0;
-        asm volatile ("" : : : "memory");
-        sti();
-        asm volatile ("hlt");
-        cli();
+        asm volatile ("hlt" : : : "memory");
     }
     return 0;
 }
@@ -284,7 +292,7 @@ static int net_wait_packet(unsigned char* buf, int max_len)
 static int arp_resolve(unsigned char* target_ip)
 {
     unsigned char pkt[64];
-    static unsigned char rx[2048];
+    unsigned char rx[2048];
     int i, len, timeout;
     unsigned short op;
 
@@ -385,7 +393,7 @@ static int udp_send(unsigned char* dest_mac, unsigned char* dest_ip,
                      unsigned short src_port, unsigned short dst_port,
                      unsigned char* data, int data_len)
 {
-    static unsigned char udp_pkt[1500];
+    unsigned char udp_pkt[1500];
     int i, udp_len;
     unsigned short cksum;
 
@@ -409,7 +417,7 @@ static unsigned short dns_id = 0;
 
 int dns_resolve(const char* domain, unsigned char* out_ip)
 {
-    static unsigned char dns_q[512];
+    unsigned char dns_q[512];
     unsigned char dns_server[4] = {8, 8, 8, 8};
     int i, q_len;
     int domain_len;
@@ -458,7 +466,7 @@ int dns_resolve(const char* domain, unsigned char* out_ip)
 
     timeout = 5000000;
     while (timeout > 0) {
-        static unsigned char rx[2048];
+        unsigned char rx[2048];
         int len = net_wait_packet(rx, sizeof(rx));
         if (len > 0) {
             arp_respond(rx, len);
@@ -479,18 +487,30 @@ int dns_resolve(const char* domain, unsigned char* out_ip)
                             while (pos < len - 16) {
                                 if (rx[pos] == 0xC0) {
                                     pos += 2;
-                                } else {
-                                    for (i = 0; i < *(rx + pos); i++) { }
-                                    pos += *(rx + pos) + 1;
                                     break;
                                 }
+                                if (rx[pos] == 0) {
+                                    pos++;
+                                    break;
+                                }
+                                if ((int)rx[pos] + 1 >= len - pos)
+                                    break;
+                                pos += (int)rx[pos] + 1;
                             }
                             while (pos < len - 16) {
-                                if (rx[pos] == 0xC0) pos += 2;
-                                else { pos += *(rx + pos) + 1; pos += 4; break; }
-                                pos += 4;
+                                if (rx[pos] == 0xC0) {
+                                    pos += 2;
+                                    break;
+                                }
+                                if (rx[pos] == 0) {
+                                    pos++;
+                                    break;
+                                }
+                                if ((int)rx[pos] + 1 >= len - pos)
+                                    break;
+                                pos += (int)rx[pos] + 1;
                             }
-                            pos += 6;
+                            pos += 10;
                             if (pos + 4 <= len) {
                                 if ((((unsigned short)rx[pos - 2] << 8) | rx[pos - 1]) == 0x0004) {
                                     out_ip[0] = rx[pos];
@@ -514,7 +534,7 @@ int dns_resolve(const char* domain, unsigned char* out_ip)
 
 static int ip_send(unsigned char* dest_mac, unsigned char* dest_ip, unsigned char proto, unsigned char* payload, int pay_len)
 {
-    static unsigned char pkt[2048];
+    unsigned char pkt[2048];
     int i, total_len;
     unsigned short cksum;
 
@@ -550,7 +570,7 @@ static int ip_send(unsigned char* dest_mac, unsigned char* dest_ip, unsigned cha
 
 static int tcp_compute_checksum(unsigned char* src_ip, unsigned char* dst_ip, unsigned char* tcp_seg, int tcp_len)
 {
-    static unsigned char pseudo[2048];
+    unsigned char pseudo[2048];
     int i, pseudo_len = 12 + tcp_len;
 
     for (i = 0; i < 4; i++) pseudo[i] = src_ip[i];
@@ -568,7 +588,7 @@ static int tcp_compute_checksum(unsigned char* src_ip, unsigned char* dst_ip, un
 static void tcp_build_and_send(unsigned char* dest_mac, unsigned char* dest_ip,
                                 unsigned short flags, unsigned char* data, int data_len)
 {
-    static unsigned char tcp_seg[2048];
+    unsigned char tcp_seg[2048];
     int i, tcp_len;
     unsigned short cksum;
 
@@ -627,7 +647,7 @@ static int tcp_connect(void)
 
     timeout = 10000000;
     while (timeout > 0) {
-        static unsigned char rx[2048];
+        unsigned char rx[2048];
         int len = net_wait_packet(rx, sizeof(rx));
         if (len > 0) {
             arp_respond(rx, len);
@@ -757,13 +777,11 @@ int network_init(void)
 
 int network_http_get(const char* host, const char* path)
 {
-    static unsigned char rx_buf_data[4096];
-    static char request[1024];
+    unsigned char rx_buf_data[4096];
+    char request[1024];
     int req_len, i, total = 0;
     int header_done = 0;
     int body_len = 0;
-    int in_chunked = 0;
-    int chunk_size = 0;
     int line_pos = 0;
     char line_buf[1024];
 
@@ -824,8 +842,6 @@ int network_http_get(const char* host, const char* path)
     header_done = 0;
     line_pos = 0;
     body_len = 0;
-    in_chunked = 0;
-    chunk_size = 0;
 
     while (1) {
         int len = tcp_recv_data(rx_buf_data, sizeof(rx_buf_data) - 1, 5000000);
@@ -866,20 +882,11 @@ int network_http_get(const char* host, const char* path)
                 }
                 line_buf[line_pos++] = c;
             } else {
-                if (in_chunked) {
-                    int j;
-                    for (j = 0; j < len; j++) {
-                        screen_put_char(rx_buf_data[j]);
-                    }
-                    i = len;
-                    break;
+                if (c == '\n') {
+                    screen_put_char('\n');
+                    body_len++;
                 } else {
-                    if (c == '\n') {
-                        screen_put_char('\n');
-                        body_len++;
-                    } else {
-                        screen_put_char(c);
-                    }
+                    screen_put_char(c);
                 }
             }
         }

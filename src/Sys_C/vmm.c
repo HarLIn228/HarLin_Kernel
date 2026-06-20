@@ -38,6 +38,10 @@ void vmm_map(u64 virt, u64 phys, u64 flags)
     u64* pdpt;
     u64* pd;
     u64* pt;
+    u64 old_entry;
+    u64 old_phys;
+    u64 old_flags;
+    int i;
 
     pdpt = get_or_alloc_table((u64*)&pml4[pml4_idx], flags);
     if (!pdpt)
@@ -45,9 +49,33 @@ void vmm_map(u64 virt, u64 phys, u64 flags)
     pd = get_or_alloc_table(&pdpt[pdpt_idx], flags);
     if (!pd)
         return;
-    pt = get_or_alloc_table(&pd[pd_idx], flags);
-    if (!pt)
-        return;
+
+    old_entry = pd[pd_idx];
+    if (old_entry & VMM_PRESENT) {
+        if (old_entry & VMM_HUGE) {
+            old_phys = old_entry & 0xFFFFFFFFFF000;
+            old_flags = old_entry & 0xFFF;
+            pt = (u64*)pmm_alloc();
+            if (!pt)
+                return;
+            clear_page((u64)pt);
+            for (i = 0; i < 512; i++) {
+                pt[i] = (old_phys + i * 4096) | (old_flags & ~VMM_HUGE);
+            }
+            pt[pt_idx] = (phys & 0xFFFFFFFFFF000) | VMM_PRESENT | flags;
+            pd[pd_idx] = ((u64)pt & 0xFFFFFFFFFF000) | VMM_PRESENT | VMM_WRITABLE | (flags & VMM_USER);
+            return;
+        } else {
+            pt = (u64*)(old_entry & 0xFFFFFFFFFF000);
+        }
+    } else {
+        pt = (u64*)pmm_alloc();
+        if (!pt)
+            return;
+        clear_page((u64)pt);
+        pd[pd_idx] = ((u64)pt & 0xFFFFFFFFFF000) | VMM_PRESENT | VMM_WRITABLE | (flags & VMM_USER);
+    }
+
     pt[pt_idx] = (phys & 0xFFFFFFFFFF000) | VMM_PRESENT | flags;
 }
 

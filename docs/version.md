@@ -3,7 +3,48 @@
 本项目采用 CalVer 版本号，格式为 `YY.D.H`：
 
 
-## H26.2.1（最新）
+## H26.2.8（最新）
+
+- 修复 RTC 中断风暴导致的系统崩溃，禁用 CMOS 周期性中断与 Local APIC
+- 修复 PIC 初始化时序，添加 ICW 命令间延迟
+- 修复 ATA IRQ 竞态与无限循环卡死，删除写操作后错误的 0xE7 命令
+- 修复键盘驱动中断状态保存错误（cli/sti 替换为 pushf/popf）
+- 修复网络驱动全局静态缓冲区重入问题，改为局部变量
+- 修复网卡 DMA 传递虚拟地址问题，改为分配物理内存发送
+- 修复 FAT32 cluster_buf 硬编码大小导致的溢出风险
+- 修复 FAT32 sectors_per_cluster 上限检查，拒绝异常分区
+- 修复 cx_loader map_user_pages 失败时的内存泄漏，添加回滚逻辑
+- 修复 scheduler timer_handler 的 frame 索引与中断栈帧布局不匹配
+- 修复 sys_exec 调用 schedule 后无法返回的问题
+- 修复 schedule 只调度一次的缺陷，支持重复抢占切换
+- 修复调度器竞态条件，使用 pushf/popf 保存中断状态
+- 修复 GDT 用户代码/数据段 32 位描述符错误，修正为 64 位
+- 修复 VMM 大页映射不兼容用户 4KB 页的问题，实现 2MB 大页拆分
+- 修复 VMM 空指针解引用风险，处理分配失败回滚
+- 修复 sys_alloc 返回物理地址的安全漏洞，改为返回用户虚拟地址
+- 修复 sys_free 可释放任意物理页的漏洞，限制只释放进程拥有的页
+- 修复 sys_print/sys_open/sys_read 等系统调用未验证用户指针的问题
+- 修复 sys_alloc 从 0x500000 开始扫描避免覆盖代码段
+- 修复 sys_alloc next_free_virt 跨进程共享的碎片问题，改为每个进程独立
+- 修复 process_exit 页面泄漏，添加 vmm_unmap 并记录虚拟地址
+- 修复 process_exit 死循环问题，标记为 noreturn 并使用 __builtin_unreachable
+- 修复 schedule 无就绪进程时直接返回导致的卡死，改为 sti; hlt; cli 等待
+- 修复 sys_yield 空函数问题，调用 schedule 真正让出 CPU
+- 修复 DNS 解析越界读取与无限循环风险
+- 修复键盘 Shift 键状态错误，使用 shift_count 计数器支持双 Shift
+- 修复键盘缓冲区满时静默丢弃按键的问题，添加溢出计数器
+- 修复 Harlin_ConSetColor 错误实现，正确遍历 VGA 属性字节
+- 修复 Harlin_ConPrint 在真实硬件上可能出错的 QEMU 0xE9 调试端口输出
+- 修复 syscall_stub 缺少 noreturn 标记的问题
+- 新增 HARLIN_SYS_KEYOVERFLOW 系统调用，暴露键盘溢出计数
+- 统一字符串比较函数，删除重复的 string.c/string.h，全面使用 Harlin_StrCmp
+- 修复链接错误 ___chkstk_ms 未定义的问题
+- 修复 harlin_API.c 中 outb/inb 函数未声明的编译错误
+- 修复启动时网络初始化顺序错误，确保 PMM/VMM 初始化后再初始化网络
+- 修复 QEMU 命令行 -no-hpet 参数错误
+- 修复启动时文件系统初始化顺序，先 DiskInit/PartitionInit 再挂载 FAT32 分区
+
+## H26.2.1
 
 - 将键盘、ATA 磁盘、RTL8139 网络改为中断驱动，移除轮询
 - 修复 PIC 中断完成信号（EOI）导致 CPU 休眠的问题

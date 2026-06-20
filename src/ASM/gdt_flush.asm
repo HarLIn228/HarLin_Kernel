@@ -25,7 +25,7 @@ tss_flush:
 
 jump_to_user:
     push qword (GDT_USER_DATA | 3)
-    push rdx
+    push rsi
     push qword 0x202
     push qword (GDT_USER_CODE | 3)
     push rdi

@@ -1,6 +1,5 @@
 #include "fat32.h"
 #include "ata.h"
-#include "string.h"
 
 #define FAT32_EOC      0x0FFFFFF8
 #define FAT32_BAD      0x0FFFFFF7
@@ -71,7 +70,10 @@ int Harlin_FsMount(u32 partition_lba)
     sectors_per_fat = read_le32(&sector_buf[0x24]);
     root_cluster = read_le32(&sector_buf[0x2C]);
 
-    if (bytes_per_sector != 512 || sectors_per_cluster == 0)
+    if (bytes_per_sector != 512 || sectors_per_cluster == 0 || sectors_per_cluster > 8)
+        return HARLIN_FS_ERROR;
+
+    if ((u32)sectors_per_cluster * bytes_per_sector > sizeof(cluster_buf))
         return HARLIN_FS_ERROR;
 
     fat_start_sector = reserved_sectors;

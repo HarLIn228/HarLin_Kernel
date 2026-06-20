@@ -3,6 +3,8 @@
 #include "screen.h"
 #include "gdt.h"
 
+extern void timer_handler(unsigned long* frame);
+
 struct idt_entry {
     unsigned short offset_low;
     unsigned short selector;
@@ -77,7 +79,7 @@ extern void irq12_stub(void);
 extern void irq13_stub(void);
 extern void irq14_stub(void);
 extern void irq15_stub(void);
-extern void syscall_stub(void);
+__attribute__((noreturn)) extern void syscall_stub(void);
 extern void idt_load(struct idt_ptr* ptr);
 
 static void (*irq_handlers[16])(void);
@@ -132,8 +134,13 @@ void irq_register(int irq, void (*handler)(void))
     }
 }
 
-void irq_dispatch(unsigned int irq)
+void irq_dispatch(unsigned int irq, unsigned long* frame)
 {
+    if (irq == 0) {
+        timer_handler(frame);
+        pic_send_eoi(0);
+        return;
+    }
     if (irq < 16 && irq_handlers[irq]) {
         irq_handlers[irq]();
     }
@@ -156,6 +163,7 @@ static void print_hex64(unsigned long val)
 
 void isr_handler(unsigned int vector, unsigned long error_code)
 {
+    interrupts_disable();
     screen_put_char('E');
     screen_put_char('X');
     screen_put_char('C');
@@ -168,10 +176,7 @@ void isr_handler(unsigned int vector, unsigned long error_code)
     screen_put_char(':');
     print_hex64(error_code);
     screen_put_char('\n');
-    interrupts_disable();
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+    return;
 }
 
 void interrupts_enable(void)
