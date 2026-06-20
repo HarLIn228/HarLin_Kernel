@@ -159,8 +159,7 @@ irq_common:
     iretq
 
 idt_load:
-    mov rax, [rsp + 8]
-    lidt [rax]
+    lidt [rdi]
     ret
 
 global syscall_stub

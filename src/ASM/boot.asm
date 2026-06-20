@@ -13,9 +13,6 @@ start:
     mov al, 0x03
     int 0x10
 
-    mov si, msg_boot
-    call print_string
-
     pop dx
     push dx
     xor ax, ax
@@ -34,36 +31,12 @@ start:
     int 0x13
     jc disk_error
 
-    mov si, msg_ok
-    call print_string
     call delay_1s
-
-    mov si, msg_a20
-    call print_string
     call enable_a20
-    mov si, msg_ok
-    call print_string
 
-    mov si, msg_gdt
-    call print_string
     cli
     lgdt [gdt_descriptor]
-    mov si, msg_ok
-    call print_string
-
-    mov si, msg_spk
-    call print_string
     call beep
-    mov si, msg_ok
-    call print_string
-
-    mov si, msg_vbe
-    call print_string
-    mov si, msg_ok
-    call print_string
-
-    mov si, msg_prot
-    call print_string
 
     mov ah, 0x06
     mov al, 0
@@ -160,28 +133,8 @@ setup_vesa:
     ret
 
 disk_error:
-    mov si, msg_err
-    call print_string
     jmp $
 
-msg_boot:
-    db "L", 0
-msg_ok:
-    db ".", 0
-msg_a20:
-    db "A", 0
-msg_gdt:
-    db "G", 0
-msg_spk:
-    db "S", 0
-msg_vbe:
-    db "V", 0
-msg_prot:
-    db "M", 0x0D, 0x0A, 0
-msg_err:
-    db "!", 0
-
-%include "src/ASM/print.asm"
 %include "src/ASM/delay.asm"
 %include "src/ASM/a20.asm"
 %include "src/ASM/speaker.asm"
