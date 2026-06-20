@@ -3,6 +3,7 @@
 #include "network.h"
 #include "interrupt.h"
 #include "pmm.h"
+#include "harlin_API.h"
 
 #define PCI_ADDR 0xCF8
 #define PCI_DATA 0xCFC
@@ -280,11 +281,9 @@ static int net_wait_packet(unsigned char* buf, int max_len)
 {
     int len;
     int waits;
-    for (waits = 10000; waits > 0; waits--) {
+    for (waits = 100000; waits > 0; waits--) {
         len = rtl_poll_packet(buf, max_len);
         if (len > 0) return len;
-        net_irq_done = 0;
-        asm volatile ("hlt" : : : "memory");
     }
     return 0;
 }
@@ -321,7 +320,7 @@ static int arp_resolve(unsigned char* target_ip)
 
     rtl_send_packet(pkt, 42);
 
-    timeout = 5000000;
+    timeout = 5000;
     while (timeout > 0) {
         len = net_wait_packet(rx, sizeof(rx));
         if (len > 0) {
@@ -770,9 +769,19 @@ int network_init(void)
 
     for (i = 0; i < 6; i++) gateway_mac[i] = 0;
 
-    if (!arp_resolve(gateway_ip)) return 0;
+    if (!arp_resolve(gateway_ip)) {
+        net_putstr("Gateway unresolved, network limited\n");
+    }
 
     return 1;
+}
+
+static int hex_value(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
 }
 
 int network_http_get(const char* host, const char* path)
@@ -784,6 +793,16 @@ int network_http_get(const char* host, const char* path)
     int body_len = 0;
     int line_pos = 0;
     char line_buf[1024];
+    int is_chunked = 0;
+    int chunk_state = 0;
+    int chunk_size = 0;
+    int chunk_remaining = 0;
+    int chunk_crlf = 0;
+
+#define CHUNK_STATE_SIZE     0
+#define CHUNK_STATE_DATA     1
+#define CHUNK_STATE_END_CRLF 2
+#define CHUNK_STATE_DONE     3
 
     if (!io_base) {
         net_putstr("Network not initialized\n");
@@ -826,7 +845,7 @@ int network_http_get(const char* host, const char* path)
             for (i = 0; path[i] && req_len < 1023; i++) request[req_len++] = path[i];
         }
         {
-            const char* http_ver = " HTTP/1.0\r\nHost: ";
+            const char* http_ver = " HTTP/1.1\r\nHost: ";
             for (i = 0; http_ver[i] && req_len < 1023; i++) request[req_len++] = http_ver[i];
         }
         for (i = 0; host[i] && req_len < 1023; i++) request[req_len++] = host[i];
@@ -873,6 +892,11 @@ int network_http_get(const char* host, const char* path)
                         continue;
                     }
 
+                    if (Harlin_StrCmp(line_buf, "Transfer-Encoding: chunked") == 0 ||
+                        Harlin_StrCmp(line_buf, "transfer-encoding: chunked") == 0) {
+                        is_chunked = 1;
+                    }
+
                     line_pos = 0;
                     continue;
                 }
@@ -882,11 +906,53 @@ int network_http_get(const char* host, const char* path)
                 }
                 line_buf[line_pos++] = c;
             } else {
-                if (c == '\n') {
-                    screen_put_char('\n');
-                    body_len++;
+                if (is_chunked) {
+                    if (chunk_state == CHUNK_STATE_DONE)
+                        continue;
+
+                    if (chunk_state == CHUNK_STATE_SIZE) {
+                        int v = hex_value(c);
+                        if (v >= 0) {
+                            chunk_size = (chunk_size * 16) + v;
+                        } else if (c == '\r') {
+                            chunk_crlf = 1;
+                        } else if (c == '\n') {
+                            if (chunk_size == 0) {
+                                chunk_state = CHUNK_STATE_DONE;
+                            } else {
+                                chunk_remaining = chunk_size;
+                                chunk_state = CHUNK_STATE_DATA;
+                            }
+                            chunk_size = 0;
+                            chunk_crlf = 0;
+                        } else if (c == ';' || c == ' ' || c == '\t') {
+                            continue;
+                        } else {
+                            continue;
+                        }
+                    } else if (chunk_state == CHUNK_STATE_DATA) {
+                        screen_put_char(c);
+                        if (c == '\n') body_len++;
+                        chunk_remaining--;
+                        if (chunk_remaining == 0) {
+                            chunk_state = CHUNK_STATE_END_CRLF;
+                            chunk_crlf = 0;
+                        }
+                    } else if (chunk_state == CHUNK_STATE_END_CRLF) {
+                        if (c == '\r') {
+                            chunk_crlf = 1;
+                        } else if (c == '\n') {
+                            chunk_state = CHUNK_STATE_SIZE;
+                            chunk_crlf = 0;
+                        }
+                    }
                 } else {
-                    screen_put_char(c);
+                    if (c == '\n') {
+                        screen_put_char('\n');
+                        body_len++;
+                    } else {
+                        screen_put_char(c);
+                    }
                 }
             }
         }
@@ -899,4 +965,8 @@ int network_http_get(const char* host, const char* path)
     net_putnum(body_len);
     net_putstr(" lines\n");
     return 1;
+#undef CHUNK_STATE_SIZE
+#undef CHUNK_STATE_DATA
+#undef CHUNK_STATE_END_CRLF
+#undef CHUNK_STATE_DONE
 }

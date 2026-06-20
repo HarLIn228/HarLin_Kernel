@@ -3,7 +3,36 @@
 本项目采用 CalVer 版本号，格式为 `YY.D.H`：
 
 
-## H26.2.8（最新）
+## H26.3（最新）
+
+- 实现 VGA 13H 图形模式（320x200，256 色），支持 set_mode/clear/put_pixel
+- 初始化 VGA 13H 标准 16 色调色板与灰度扩展色
+- 实现 VESA 800x600x24 图形模式，Bootloader 通过标准 VBE INT 10h 设置模式并保存模式信息
+- 修复 Bootloader setup_vesa 寄存器覆盖问题，调整 VBE 信息获取顺序
+- display.c 读取 VBE 模式信息获取 LFB 地址、分辨率与色深，支持 24bpp 与 32bpp
+- 修复 VESA LFB 映射到与内核低地址冲突的问题，统一映射到 0xFFFF800000000000
+- VESA 模式设置失败时自动回退到 VGA 文本模式
+- 实现 HTTP Chunked 传输编码流式解码状态机，支持任意大小响应
+- HTTP 请求升级到 HTTP/1.1，保持 Connection: close 兼容性
+- 实现 FAT32 文件写入支持（Harlin_FsWrite）
+- 实现 FAT32 空闲簇查找、簇分配、簇链扩展与 FAT 表双副本同步写入
+- 实现 FAT32 文件创建（Harlin_FsCreate），支持 8.3 短文件名
+- 修复 Harlin_FsCreate 不检查文件已存在的问题，避免同名目录项冲突
+- 在 Harlin_File 中记录目录项位置，写入后自动更新文件大小
+- 实现进程间通信管道（Pipe）内核对象
+- 新增 PIPE_CREATE / PIPE_READ / PIPE_WRITE / PIPE_CLOSE / PIPE_READY 系统调用
+- 新增 Harlin_PipeCreate / Read / Write / Ready / Close 用户态 API
+- 修复 sys_pipe_create 返回值设计缺陷，返回管道 ID
+- 修复 harlin_API.c 中 Harlin_FsRead/FsWrite/FsSize/FsClose 重复定义导致的无限递归
+- 内核启动后停留在 The HarLin 页面，作为成功启动标志
+- 修复内核启动后显示模式被 Bootloader VBE 改变的问题，强制回到 VGA 文本模式
+- 移除 Bootloader 默认 VBE 调用，默认以 VGA 文本模式启动
+- 重写 `docs/手册.md` 为小白上手版本，包含逐行修改位置与常见坑解决
+- 修复网络初始化 ARP 查询超时过长导致启动卡住的问题
+- 默认启动不初始化网络模块，保持内核地基稳定启动
+- 在 `docs/手册.md` 中新增网络模块启用说明
+
+## H26.2.8
 
 - 修复 RTC 中断风暴导致的系统崩溃，禁用 CMOS 周期性中断与 Local APIC
 - 修复 PIC 初始化时序，添加 ICW 命令间延迟

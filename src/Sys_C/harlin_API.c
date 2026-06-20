@@ -12,6 +12,7 @@
 #include "gdt.h"
 #include "cx_loader.h"
 #include "scheduler.h"
+#include "pipe.h"
 
 extern void screen_put_char(char c);
 
@@ -208,6 +209,47 @@ void Harlin_DisplayPutString(int x, int y, const char* str, unsigned char color)
     display_put_string(x, y, str, color);
 }
 
+int Harlin_PipeCreate(struct Harlin_Pipe* pipe)
+{
+    int id;
+    if (!pipe)
+        return -1;
+    id = pipe_create();
+    if (id < 0)
+        return id;
+    pipe->id = id;
+    return 0;
+}
+
+int Harlin_PipeRead(struct Harlin_Pipe* pipe, void* buf, u32 len)
+{
+    if (!pipe)
+        return -1;
+    return pipe_read(pipe->id, buf, len);
+}
+
+int Harlin_PipeWrite(struct Harlin_Pipe* pipe, const void* buf, u32 len)
+{
+    if (!pipe)
+        return -1;
+    return pipe_write(pipe->id, buf, len);
+}
+
+int Harlin_PipeReady(struct Harlin_Pipe* pipe)
+{
+    if (!pipe)
+        return 0;
+    return pipe_ready(pipe->id);
+}
+
+void Harlin_PipeClose(struct Harlin_Pipe* pipe)
+{
+    if (!pipe)
+        return;
+    pipe_close(pipe->id);
+    pipe->id = -1;
+}
+
 int Harlin_KeyReady(void)
 {
     return keyboard_has_data();
@@ -278,14 +320,15 @@ void Harlin_Boot(void)
     }
     outb(0x21, inb(0x21) | 0x04);
     keyboard_init();
-    network_init();
     interrupts_enable();
 
     Harlin_PmmInit();
     Harlin_VmmInit(0x20000);
     scheduler_init();
     timer_init();
+    pipe_init();
 
+    Harlin_DisplaySetMode(HARLIN_DISP_VGA_TEXT);
     screen_clear();
     Harlin_ConPrint("\n");
     Harlin_ConPrint("The HarLin\n");
@@ -299,40 +342,8 @@ void Harlin_Boot(void)
     Harlin_ConPrint("(C) 2026 HarLin228 Studio\n");
     Harlin_ConPrint("\n");
 
-    {
-        struct Harlin_File init_file;
-        u32 mount_lba = 0;
-        int i;
-
-        Harlin_DiskInit();
-        Harlin_PartitionInit();
-
-        for (i = 0; i < 4; i++) {
-            struct partition_entry part;
-            if (partition_get(i, &part) == 0 && part.type == PARTITION_TYPE_FAT32) {
-                mount_lba = part.start_lba;
-                break;
-            }
-        }
-
-        if (Harlin_FsMount(mount_lba) == 0 && Harlin_FsOpen("init.cx", &init_file) == 0) {
-            u32 size = Harlin_FsSize(&init_file);
-            void* buf = (void*)Harlin_PmmAlloc();
-            if (buf && size > 0 && size <= 4096 && Harlin_FsRead(&init_file, buf, size) == (int)size) {
-                Harlin_FsClose(&init_file);
-                if (cx_load(buf, size) >= 0) {
-                    schedule();
-                }
-            }
-        }
-    }
-
     for (;;) {
-        Harlin_IntOff();
-        if (!Harlin_KeyReady()) {
-            Harlin_IntOn();
-            asm volatile ("hlt");
-        }
         Harlin_IntOn();
+        asm volatile ("hlt");
     }
 }

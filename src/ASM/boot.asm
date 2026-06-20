@@ -43,7 +43,6 @@ start:
     call enable_a20
     mov si, msg_ok
     call print_string
-    call delay_1s
 
     mov si, msg_gdt
     call print_string
@@ -51,18 +50,20 @@ start:
     lgdt [gdt_descriptor]
     mov si, msg_ok
     call print_string
-    call delay_1s
 
     mov si, msg_spk
     call print_string
     call beep
     mov si, msg_ok
     call print_string
-    call delay_1s
+
+    mov si, msg_vbe
+    call print_string
+    mov si, msg_ok
+    call print_string
 
     mov si, msg_prot
     call print_string
-    call delay_1s
 
     mov ah, 0x06
     mov al, 0
@@ -141,25 +142,44 @@ long_mode:
     jmp $
 
 [BITS 16]
+setup_vesa:
+    mov ax, 0x4F02
+    mov bx, 0x4115
+    int 0x10
+    cmp ax, 0x004F
+    jne .vbe_done
+
+    xor ax, ax
+    mov es, ax
+    mov di, 0x7000
+    mov ax, 0x4F01
+    mov cx, 0x4115
+    int 0x10
+
+.vbe_done:
+    ret
+
 disk_error:
     mov si, msg_err
     call print_string
     jmp $
 
 msg_boot:
-    db "Loading kernel...", 0
+    db "L", 0
 msg_ok:
-    db " OK", 0x0D, 0x0A, 0
+    db ".", 0
 msg_a20:
-    db "A20", 0
+    db "A", 0
 msg_gdt:
-    db "GDT", 0
+    db "G", 0
 msg_spk:
-    db "SPK", 0
+    db "S", 0
+msg_vbe:
+    db "V", 0
 msg_prot:
-    db "LM", 0x0D, 0x0A, 0
+    db "M", 0x0D, 0x0A, 0
 msg_err:
-    db "Error!", 0
+    db "!", 0
 
 %include "src/ASM/print.asm"
 %include "src/ASM/delay.asm"

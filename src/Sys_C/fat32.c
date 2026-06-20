@@ -39,6 +39,11 @@ static int read_sector(u32 lba, void* buf)
     return ata_read_sectors(fs_partition_lba + lba, 1, buf);
 }
 
+static int write_sector(u32 lba, const void* buf)
+{
+    return ata_write_sectors(fs_partition_lba + lba, 1, buf);
+}
+
 static u32 next_cluster(u32 cluster)
 {
     u32 fat_offset = cluster * 4;
@@ -86,6 +91,82 @@ static int read_cluster(u32 cluster, void* buf)
 {
     u32 sector = cluster_to_sector(cluster);
     return ata_read_sectors(fs_partition_lba + sector, sectors_per_cluster, buf);
+}
+
+static int write_cluster(u32 cluster, const void* buf)
+{
+    u32 sector = cluster_to_sector(cluster);
+    return ata_write_sectors(fs_partition_lba + sector, sectors_per_cluster, buf);
+}
+
+static void write_le32(u8* p, u32 val)
+{
+    p[0] = (u8)(val);
+    p[1] = (u8)(val >> 8);
+    p[2] = (u8)(val >> 16);
+    p[3] = (u8)(val >> 24);
+}
+
+static void write_le16(u8* p, u16 val)
+{
+    p[0] = (u8)(val);
+    p[1] = (u8)(val >> 8);
+}
+
+static int write_fat_entry(u32 cluster, u32 value)
+{
+    u32 fat_offset = cluster * 4;
+    u32 fat_sector = fat_offset / bytes_per_sector;
+    u32 entry_offset = fat_offset % bytes_per_sector;
+    u8 fat;
+
+    for (fat = 0; fat < number_of_fats; fat++) {
+        u32 lba = fat_start_sector + (fat * sectors_per_fat) + fat_sector;
+        if (read_sector(lba, sector_buf) != 0)
+            return -1;
+        write_le32(&sector_buf[entry_offset], value & 0x0FFFFFFF);
+        if (write_sector(lba, sector_buf) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static u32 find_free_cluster(void)
+{
+    u32 cluster = 2;
+    u32 total_clusters = (sectors_per_fat * bytes_per_sector) / 4;
+
+    while (cluster < total_clusters) {
+        u32 fat_offset = cluster * 4;
+        u32 fat_sector = fat_offset / bytes_per_sector;
+        u32 entry_offset = fat_offset % bytes_per_sector;
+        u32 entry;
+
+        if (read_sector(fat_start_sector + fat_sector, sector_buf) != 0)
+            return 0;
+
+        entry = read_le32(&sector_buf[entry_offset]) & 0x0FFFFFFF;
+        if (entry == 0)
+            return cluster;
+        cluster++;
+    }
+    return 0;
+}
+
+static int allocate_cluster(u32* new_cluster)
+{
+    u32 cluster = find_free_cluster();
+    if (!cluster)
+        return -1;
+    if (write_fat_entry(cluster, FAT32_EOC) != 0)
+        return -1;
+    *new_cluster = cluster;
+    return 0;
+}
+
+static int link_cluster(u32 prev, u32 next)
+{
+    return write_fat_entry(prev, next);
 }
 
 static int filename_match(const char* name, const u8* entry)
@@ -139,6 +220,8 @@ int Harlin_FsOpen(const char* name, struct Harlin_File* out)
                 out->current_cluster = out->start_cluster;
                 out->position = 0;
                 out->size = read_le32(&entry[0x1C]);
+                out->dir_cluster = cluster;
+                out->dir_offset = i;
                 return HARLIN_FS_OK;
             }
         }
@@ -202,5 +285,258 @@ void Harlin_FsClose(struct Harlin_File* file)
         file->current_cluster = 0;
         file->position = 0;
         file->size = 0;
+        file->dir_cluster = 0;
+        file->dir_offset = 0;
     }
+}
+
+static int extend_file_clusters(struct Harlin_File* file, u32 total_clusters_needed)
+{
+    u32 cluster = file->start_cluster;
+    u32 current_clusters = 0;
+    u32 last_cluster = 0;
+
+    if (!cluster || cluster >= FAT32_EOC) {
+        u32 new_cluster;
+        if (allocate_cluster(&new_cluster) != 0)
+            return -1;
+        file->start_cluster = new_cluster;
+        file->current_cluster = new_cluster;
+        cluster = new_cluster;
+        current_clusters = 1;
+        if (current_clusters >= total_clusters_needed)
+            return 0;
+    }
+
+    while (cluster < FAT32_EOC) {
+        u32 next = next_cluster(cluster);
+        last_cluster = cluster;
+        current_clusters++;
+        if (next >= FAT32_EOC)
+            break;
+        cluster = next;
+    }
+
+    while (current_clusters < total_clusters_needed) {
+        u32 new_cluster;
+        if (allocate_cluster(&new_cluster) != 0)
+            return -1;
+        if (link_cluster(last_cluster, new_cluster) != 0)
+            return -1;
+        last_cluster = new_cluster;
+        current_clusters++;
+    }
+
+    return 0;
+}
+
+static int update_directory_size(struct Harlin_File* file)
+{
+    if (!file->dir_cluster)
+        return 0;
+    if (read_cluster(file->dir_cluster, cluster_buf) != 0)
+        return -1;
+    write_le32(&cluster_buf[file->dir_offset + 0x1C], file->size);
+    if (write_cluster(file->dir_cluster, cluster_buf) != 0)
+        return -1;
+    return 0;
+}
+
+int Harlin_FsWrite(struct Harlin_File* file, const void* buf, u32 len)
+{
+    const u8* src = (const u8*)buf;
+    u32 remaining = len;
+    u32 cluster_size = bytes_per_sector * sectors_per_cluster;
+    u32 total_clusters_needed;
+
+    if (!file || !buf)
+        return HARLIN_FS_ERROR;
+
+    if (len == 0)
+        return 0;
+
+    total_clusters_needed = (file->position + len + cluster_size - 1) / cluster_size;
+
+    if (extend_file_clusters(file, total_clusters_needed) != 0)
+        return HARLIN_FS_ERROR;
+
+    if (file->current_cluster == 0 || file->current_cluster >= FAT32_EOC)
+        file->current_cluster = file->start_cluster;
+
+    while (remaining > 0 && file->current_cluster < FAT32_EOC) {
+        u32 cluster_pos = file->position % cluster_size;
+        u32 chunk = cluster_size - cluster_pos;
+
+        if (chunk > remaining)
+            chunk = remaining;
+
+        if (chunk < cluster_size) {
+            if (read_cluster(file->current_cluster, cluster_buf) != 0)
+                return HARLIN_FS_ERROR;
+        } else {
+            int i;
+            for (i = 0; i < (int)cluster_size; i++)
+                cluster_buf[i] = 0;
+        }
+
+        Harlin_MemCopy(&cluster_buf[cluster_pos], src, chunk);
+
+        if (write_cluster(file->current_cluster, cluster_buf) != 0)
+            return HARLIN_FS_ERROR;
+
+        src += chunk;
+        file->position += chunk;
+        remaining -= chunk;
+
+        if (remaining > 0) {
+            file->current_cluster = next_cluster(file->current_cluster);
+        }
+    }
+
+    if (file->position > file->size)
+        file->size = file->position;
+
+    update_directory_size(file);
+
+    return (int)(len - remaining);
+}
+
+static void to_upper(char* dst, const char* src, int max)
+{
+    int i;
+    for (i = 0; i < max && src[i]; i++) {
+        char c = src[i];
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 'a' + 'A');
+        dst[i] = c;
+    }
+    for (; i < max; i++)
+        dst[i] = ' ';
+    dst[max] = '\0';
+}
+
+static int make_short_name(const char* name, u8* out)
+{
+    char base[9];
+    char ext[4];
+    const char* dot;
+    int i, j;
+
+    for (i = 0; name[i]; i++) {
+        if (name[i] >= 'A' && name[i] <= 'Z') continue;
+        if (name[i] >= 'a' && name[i] <= 'z') continue;
+        if (name[i] >= '0' && name[i] <= '9') continue;
+        if (name[i] == '~' || name[i] == '_' || name[i] == '-' || name[i] == '.') continue;
+        return -1;
+    }
+
+    dot = 0;
+    for (i = 0; name[i]; i++) {
+        if (name[i] == '.') dot = &name[i];
+    }
+
+    if (dot) {
+        int base_len = (int)(dot - name);
+        int ext_len = 0;
+        for (i = 0; dot[i + 1] && ext_len < 3; i++)
+            ext_len++;
+        if (base_len > 8 || ext_len > 3)
+            return -1;
+        to_upper(base, name, 8);
+        to_upper(ext, dot + 1, 3);
+    } else {
+        if (i > 8)
+            return -1;
+        to_upper(base, name, 8);
+        to_upper(ext, "", 3);
+    }
+
+    j = 0;
+    for (i = 0; i < 8; i++)
+        out[j++] = (u8)base[i];
+    for (i = 0; i < 3; i++)
+        out[j++] = (u8)ext[i];
+    return 0;
+}
+
+static int find_directory_slot(u32* dir_cluster, u32* dir_offset)
+{
+    u32 cluster = root_cluster;
+
+    while (cluster < FAT32_EOC) {
+        u32 i;
+        if (read_cluster(cluster, cluster_buf) != 0)
+            return -1;
+        for (i = 0; i < bytes_per_sector * sectors_per_cluster; i += 32) {
+            u8* entry = &cluster_buf[i];
+            if (entry[0] == 0 || entry[0] == FAT32_DELETED) {
+                *dir_cluster = cluster;
+                *dir_offset = i;
+                return 0;
+            }
+        }
+        cluster = next_cluster(cluster);
+    }
+    return -1;
+}
+
+int Harlin_FsCreate(const char* name, struct Harlin_File* out)
+{
+    u8 short_name[11];
+    u32 cluster;
+    u32 dir_cluster, dir_offset;
+    struct Harlin_File existing;
+
+    if (!name || !out)
+        return HARLIN_FS_ERROR;
+    if (make_short_name(name, short_name) != 0)
+        return HARLIN_FS_ERROR;
+    if (Harlin_FsOpen(name, &existing) == HARLIN_FS_OK)
+        return HARLIN_FS_ERROR;
+    if (find_directory_slot(&dir_cluster, &dir_offset) != 0)
+        return HARLIN_FS_ERROR;
+    if (allocate_cluster(&cluster) != 0)
+        return HARLIN_FS_ERROR;
+
+    {
+        int i;
+        for (i = 0; i < (int)(bytes_per_sector * sectors_per_cluster); i++)
+            cluster_buf[i] = 0;
+        if (write_cluster(cluster, cluster_buf) != 0)
+            return HARLIN_FS_ERROR;
+    }
+
+    if (read_cluster(dir_cluster, cluster_buf) != 0)
+        return HARLIN_FS_ERROR;
+
+    {
+        u8* entry = &cluster_buf[dir_offset];
+        int i;
+        for (i = 0; i < 11; i++)
+            entry[i] = short_name[i];
+        entry[11] = 0x20;
+        entry[12] = 0;
+        entry[13] = 0;
+        write_le16(&entry[14], 0);
+        write_le16(&entry[16], 0);
+        write_le16(&entry[18], 0);
+        write_le16(&entry[20], 0);
+        write_le16(&entry[22], 0);
+        write_le16(&entry[24], 0);
+        write_le16(&entry[26], (u16)(cluster >> 16));
+        write_le16(&entry[28], 0);
+        write_le16(&entry[30], (u16)(cluster & 0xFFFF));
+        write_le32(&entry[0x1C], 0);
+    }
+
+    if (write_cluster(dir_cluster, cluster_buf) != 0)
+        return HARLIN_FS_ERROR;
+
+    out->start_cluster = cluster;
+    out->current_cluster = cluster;
+    out->position = 0;
+    out->size = 0;
+    out->dir_cluster = dir_cluster;
+    out->dir_offset = dir_offset;
+    return HARLIN_FS_OK;
 }

@@ -6,6 +6,7 @@
 #include "vmm.h"
 #include "fat32.h"
 #include "cx_loader.h"
+#include "pipe.h"
 
 #define USER_ADDR_START 0x400000
 #define USER_ADDR_END   0x800000
@@ -253,6 +254,55 @@ static unsigned long sys_key_overflow_count(struct syscall_regs* r)
     return (unsigned long)keyboard_overflow_count();
 }
 
+static unsigned long sys_pipe_create(struct syscall_regs* r)
+{
+    int id = pipe_create();
+    if (id < 0)
+        return (unsigned long)id;
+    if (r->rdi) {
+        struct Harlin_Pipe* pipe = (struct Harlin_Pipe*)r->rdi;
+        if (!user_ptr_valid((u64)pipe, sizeof(*pipe)))
+            return (unsigned long)-1;
+        pipe->id = id;
+    }
+    return (unsigned long)id;
+}
+
+static unsigned long sys_pipe_ready(struct syscall_regs* r)
+{
+    int id = (int)r->rdi;
+    return (unsigned long)pipe_ready(id);
+}
+
+static unsigned long sys_pipe_read(struct syscall_regs* r)
+{
+    int id = (int)r->rdi;
+    void* buf = (void*)r->rsi;
+    u32 len = (u32)r->rdx;
+
+    if (!user_ptr_valid((u64)buf, len))
+        return (unsigned long)-1;
+    return (unsigned long)pipe_read(id, buf, len);
+}
+
+static unsigned long sys_pipe_write(struct syscall_regs* r)
+{
+    int id = (int)r->rdi;
+    const void* buf = (const void*)r->rsi;
+    u32 len = (u32)r->rdx;
+
+    if (!user_ptr_valid((u64)buf, len))
+        return (unsigned long)-1;
+    return (unsigned long)pipe_write(id, buf, len);
+}
+
+static unsigned long sys_pipe_close(struct syscall_regs* r)
+{
+    int id = (int)r->rdi;
+    pipe_close(id);
+    return 0;
+}
+
 static unsigned long sys_sleep(struct syscall_regs* r)
 {
     unsigned long ms = r->rdi;
@@ -279,6 +329,11 @@ static syscall_t syscall_table[] = {
     [HARLIN_SYS_YIELD]       = sys_yield,
     [HARLIN_SYS_SLEEP]       = sys_sleep,
     [HARLIN_SYS_KEYOVERFLOW] = sys_key_overflow_count,
+    [HARLIN_SYS_PIPE_CREATE] = sys_pipe_create,
+    [HARLIN_SYS_PIPE_READ]   = sys_pipe_read,
+    [HARLIN_SYS_PIPE_WRITE]  = sys_pipe_write,
+    [HARLIN_SYS_PIPE_CLOSE]  = sys_pipe_close,
+    [HARLIN_SYS_PIPE_READY]  = sys_pipe_ready,
 };
 
 #define SYSCALL_COUNT (sizeof(syscall_table) / sizeof(syscall_table[0]))

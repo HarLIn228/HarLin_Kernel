@@ -46,6 +46,11 @@ typedef signed long long   s64;
 #define HARLIN_SYS_YIELD        9
 #define HARLIN_SYS_SLEEP        10
 #define HARLIN_SYS_KEYOVERFLOW  11
+#define HARLIN_SYS_PIPE_CREATE  12
+#define HARLIN_SYS_PIPE_READ    13
+#define HARLIN_SYS_PIPE_WRITE   14
+#define HARLIN_SYS_PIPE_CLOSE   15
+#define HARLIN_SYS_PIPE_READY   16
 
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
@@ -117,12 +122,26 @@ struct Harlin_File {
     u32 current_cluster;
     u32 position;
     u32 size;
+    u32 dir_cluster;
+    u32 dir_offset;
+};
+
+struct Harlin_Pipe {
+    int id;
 };
 
 int  Harlin_FsMount(u32 partition_lba);
 int  Harlin_FsOpen(const char* name, struct Harlin_File* out);
+int  Harlin_FsCreate(const char* name, struct Harlin_File* out);
 int  Harlin_FsRead(struct Harlin_File* file, void* buf, u32 len);
+int  Harlin_FsWrite(struct Harlin_File* file, const void* buf, u32 len);
 u32  Harlin_FsSize(struct Harlin_File* file);
 void Harlin_FsClose(struct Harlin_File* file);
+
+int  Harlin_PipeCreate(struct Harlin_Pipe* pipe);
+int  Harlin_PipeRead(struct Harlin_Pipe* pipe, void* buf, u32 len);
+int  Harlin_PipeWrite(struct Harlin_Pipe* pipe, const void* buf, u32 len);
+int  Harlin_PipeReady(struct Harlin_Pipe* pipe);
+void Harlin_PipeClose(struct Harlin_Pipe* pipe);
 
 #endif
