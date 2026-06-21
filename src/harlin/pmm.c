@@ -2,11 +2,28 @@
 
 static volatile u8* bitmap = (volatile u8*)PMM_BITMAP_ADDR;
 
+extern char __bss_end[];
+
 void pmm_init(void)
 {
     u32 i;
+    u32 kernel_end_page;
+    u32 bitmap_start_page;
+    u32 bitmap_end_page;
+
     for (i = 0; i < PMM_TOTAL_PAGES / 8; i++)
         bitmap[i] = 0;
+
+    kernel_end_page = (((u32)(u64)__bss_end) + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
+    bitmap_start_page = PMM_BITMAP_ADDR / PMM_PAGE_SIZE;
+    bitmap_end_page = (PMM_BITMAP_ADDR + (PMM_TOTAL_PAGES / 8) + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
+
+    for (i = PMM_BASE_ADDR / PMM_PAGE_SIZE; i < (PMM_BASE_ADDR / PMM_PAGE_SIZE) + PMM_TOTAL_PAGES; i++) {
+        if (i < kernel_end_page || (i >= bitmap_start_page && i < bitmap_end_page)) {
+            u32 idx = i - (PMM_BASE_ADDR / PMM_PAGE_SIZE);
+            bitmap[idx / 8] |= (1 << (idx % 8));
+        }
+    }
 }
 
 u64 pmm_alloc(void)

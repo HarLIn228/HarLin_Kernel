@@ -99,9 +99,23 @@ void Harlin_IntOff(void);
 ## 8. 键盘 API
 
 ```c
+#define HARLIN_KEY_SHIFT  0x01
+#define HARLIN_KEY_CTRL   0x02
+#define HARLIN_KEY_ALT    0x04
+#define HARLIN_KEY_CAPS   0x08
+#define HARLIN_KEY_NUM    0x10
+#define HARLIN_KEY_SCROLL 0x20
+
+#define HARLIN_LED_SCROLL 0x01
+#define HARLIN_LED_NUM    0x02
+#define HARLIN_LED_CAPS   0x04
+
 int  Harlin_KeyAvail(void);
 char Harlin_GetKey(void);
 int  Harlin_KeyOverflow(void);
+void Harlin_KeyFlush(void);
+u8   Harlin_KeyState(void);
+void Harlin_KeyLed(u8 leds);
 ```
 
 ## 9. 字符串与内存 API
@@ -140,6 +154,12 @@ void Harlin_InitVmm(u64 pml4_phys);
 void Harlin_Map(u64 virt, u64 phys, u64 flags);
 void Harlin_Unmap(u64 virt);
 u64  Harlin_ToPhys(u64 virt);
+
+void Harlin_InitKmalloc(void);
+void* Harlin_Kmalloc(u64 size);
+void  Harlin_Kfree(void* ptr);
+void* Harlin_Krealloc(void* ptr, u64 size);
+u64   Harlin_Ksize(void* ptr);
 ```
 
 ## 12. 磁盘 API
@@ -204,7 +224,45 @@ int  Harlin_ReadyPipe(struct Harlin_Pipe* pipe);
 void Harlin_ClosePipe(struct Harlin_Pipe* pipe);
 ```
 
-## 16. 系统控制 API
+## 16. SMP API
+
+```c
+void Harlin_InitSmp(void);
+int  Harlin_CpuCount(void);
+int  Harlin_CurrentCpu(void);
+void Harlin_SendIpi(int cpu, u8 vector);
+```
+
+## 17. 自旋锁 API
+
+```c
+struct Harlin_Spinlock {
+    volatile u32 lock;
+};
+
+void Harlin_SpinlockInit(struct Harlin_Spinlock* lk);
+void Harlin_SpinlockAcquire(struct Harlin_Spinlock* lk);
+void Harlin_SpinlockRelease(struct Harlin_Spinlock* lk);
+```
+
+## 18. RTC API
+
+```c
+struct Harlin_RtcTime {
+    u8 second;
+    u8 minute;
+    u8 hour;
+    u8 day;
+    u8 month;
+    u16 year;
+};
+
+void Harlin_InitRtc(void);
+void Harlin_RtcRead(struct Harlin_RtcTime* out);
+u64  Harlin_RtcBootSeconds(void);
+```
+
+## 19. 系统控制 API
 
 ```c
 void Harlin_Boot(void);
@@ -234,6 +292,17 @@ void Harlin_Shutdown(void);
 | 14 | sys_pipe_write | 向管道写入 |
 | 15 | sys_pipe_close | 关闭管道 |
 | 16 | sys_pipe_ready | 检查管道是否有数据可读 |
+| 17 | sys_getpid | 获取当前进程 ID |
+| 18 | sys_getcpu | 获取当前 CPU 编号 |
+| 19 | sys_time | 读取 RTC 时间 |
+| 20 | sys_beep | 蜂鸣器发声 |
+| 21 | sys_kmalloc | 内核堆内存分配 |
+| 22 | sys_kfree | 释放内核堆内存 |
+| 23 | sys_mmap | 映射一段用户内存 |
+| 24 | sys_unmap | 解除用户内存映射 |
+| 25 | sys_getkeystate | 获取键盘修饰键状态 |
+| 26 | sys_keyled | 设置键盘 LED |
+| 27 | sys_setpriority | 设置当前进程优先级 |
 
 完整的系统调用表在内核中定义，并通过 `harlin_API.h` 向用户空间导出。
 

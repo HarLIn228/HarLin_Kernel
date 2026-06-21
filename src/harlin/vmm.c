@@ -32,12 +32,15 @@ void vmm_init(u64 pml4_phys)
     pml4 = (volatile u64*)pml4_phys;
 }
 
+#define USER_ADDR_START 0x400000
+#define USER_ADDR_END   0x800000
+
 void vmm_map(u64 virt, u64 phys, u64 flags)
 {
-    u64 pml4_idx = (virt >> 39) & 0x1FF;
-    u64 pdpt_idx = (virt >> 30) & 0x1FF;
-    u64 pd_idx = (virt >> 21) & 0x1FF;
-    u64 pt_idx = (virt >> 12) & 0x1FF;
+    u64 pml4_idx;
+    u64 pdpt_idx;
+    u64 pd_idx;
+    u64 pt_idx;
     u64* pdpt;
     u64* pd;
     u64* pt;
@@ -45,6 +48,14 @@ void vmm_map(u64 virt, u64 phys, u64 flags)
     u64 old_phys;
     u64 old_flags;
     int i;
+
+    if ((flags & VMM_USER) && (virt < USER_ADDR_START || virt >= USER_ADDR_END))
+        return;
+
+    pml4_idx = (virt >> 39) & 0x1FF;
+    pdpt_idx = (virt >> 30) & 0x1FF;
+    pd_idx = (virt >> 21) & 0x1FF;
+    pt_idx = (virt >> 12) & 0x1FF;
 
     pdpt = get_or_alloc_table((u64*)&pml4[pml4_idx], flags);
     if (!pdpt)

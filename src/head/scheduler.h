@@ -3,9 +3,10 @@
 
 #include "harlin_API.h"
 
-#define PROC_STATE_NONE   0
-#define PROC_STATE_READY  1
-#define PROC_STATE_RUNNING 2
+#define PROC_STATE_NONE     0
+#define PROC_STATE_READY    1
+#define PROC_STATE_RUNNING  2
+#define PROC_STATE_SLEEPING 3
 
 struct process {
     u64 rax, rcx, rdx, rbx, rbp, rsi, rdi;
@@ -15,6 +16,11 @@ struct process {
     u64 rflags;
     int state;
     int first_run;
+    int pid;
+    int cpu;
+    u32 priority;
+    u32 time_slice;
+    u32 sleep_until;
     u64 user_pages[16];
     u64 user_vaddrs[16];
     int page_count;
@@ -30,5 +36,9 @@ void process_exit(void) __attribute__((noreturn));
 struct process* process_current(void);
 void timer_init(void);
 void timer_handler(unsigned long* frame);
+void scheduler_tick(void);
+void scheduler_add_ready(int pid);
+void scheduler_sleep(u32 ms);
+int scheduler_get_load(int cpu);
 
 #endif

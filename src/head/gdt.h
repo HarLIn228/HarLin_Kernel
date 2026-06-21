@@ -10,6 +10,8 @@
 #define GDT_TSS         0x38
 
 void gdt_init(void);
+void gdt_init_for_cpu(int cpu);
 void tss_set_rsp0(u64 rsp);
+void tss_set_rsp0_for_cpu(int cpu, u64 rsp);
 
 #endif

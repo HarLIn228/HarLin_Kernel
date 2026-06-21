@@ -3,13 +3,14 @@
 #include "network.h"
 #include "interrupt.h"
 #include "pmm.h"
+#include "vmm.h"
+#include "kmalloc.h"
 #include "harlin_API.h"
 
 #define PCI_ADDR 0xCF8
 #define PCI_DATA 0xCFC
 
 #define RX_BUF_SIZE 0x2000
-#define RX_BUF_PHYS 0x210000
 #define TX_BUF_SIZE  2048
 #define TX_BUF_COUNT 4
 
@@ -49,7 +50,7 @@ static unsigned int   tcp_seq_local  = 0;
 static unsigned int   tcp_seq_remote = 0;
 static volatile int tcp_state = 0;
 
-static volatile unsigned char* rx_buf = (volatile unsigned char*)RX_BUF_PHYS;
+static volatile unsigned char* rx_buf = 0;
 
 static void net_putstr(const char* s)
 {
@@ -153,6 +154,7 @@ static void rtl_init(void)
 {
     int i;
     unsigned int val;
+    unsigned long rx_phys;
 
     local_mac[0] = inb(io_base + 0);
     local_mac[1] = inb(io_base + 1);
@@ -179,7 +181,13 @@ static void rtl_init(void)
         val = inb(io_base + 0x37);
     }
 
-    outl(io_base + 0x30, RX_BUF_PHYS);
+    rx_buf = (volatile unsigned char*)kmalloc(RX_BUF_SIZE + 16);
+    if (!rx_buf) {
+        net_putstr("RTL8139 rx buffer alloc failed\n");
+        return;
+    }
+    rx_phys = vmm_get_phys((u64)rx_buf);
+    outl(io_base + 0x30, (unsigned int)rx_phys);
 
     outl(io_base + 0x40, 0x03000700);
     outl(io_base + 0x44, 0x0000070F);
@@ -223,10 +231,9 @@ static void rtl_send_packet(unsigned char* pkt, int len)
 
     if (len > TX_BUF_SIZE) len = TX_BUF_SIZE;
 
-    phys = pmm_alloc();
-    if (!phys)
+    tx_buf = (unsigned char*)kmalloc(TX_BUF_SIZE);
+    if (!tx_buf)
         return;
-    tx_buf = (unsigned char*)phys;
 
     for (i = 0; i < len; i++) {
         tx_buf[i] = pkt[i];
@@ -235,12 +242,13 @@ static void rtl_send_packet(unsigned char* pkt, int len)
         tx_buf[i] = 0;
     }
 
+    phys = vmm_get_phys((u64)tx_buf);
     outl(io_base + 0x20, (unsigned int)phys);
     outl(io_base + 0x10, (unsigned int)(tx_len & 0xFFF));
 
     net_wait_irq();
 
-    pmm_free(phys);
+    kfree(tx_buf);
 }
 
 static int rtl_poll_packet(unsigned char* buf, int max_len)

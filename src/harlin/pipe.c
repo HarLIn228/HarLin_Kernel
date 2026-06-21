@@ -1,5 +1,5 @@
 #include "pipe.h"
-#include "pmm.h"
+#include "kmalloc.h"
 #include "harlin_API.h"
 
 #define PIPE_COUNT 16
@@ -35,7 +35,6 @@ int pipe_init(void)
 int pipe_create(void)
 {
     int i;
-    u64 phys;
     u8* buf;
 
     for (i = 0; i < PIPE_COUNT; i++) {
@@ -45,11 +44,10 @@ int pipe_create(void)
     if (i >= PIPE_COUNT)
         return HARLIN_NO_MEMORY;
 
-    phys = pmm_alloc();
-    if (!phys)
+    buf = (u8*)kmalloc(PIPE_BUFFER_SIZE);
+    if (!buf)
         return HARLIN_NO_MEMORY;
 
-    buf = (u8*)phys;
     pipe_table[i].buffer = buf;
     pipe_table[i].head = 0;
     pipe_table[i].tail = 0;
@@ -143,7 +141,7 @@ void pipe_close(int id)
 
     if (p->readers == 0 && p->writers == 0) {
         if (p->buffer)
-            pmm_free((u64)p->buffer);
+            kfree(p->buffer);
         p->buffer = 0;
         p->used = 0;
     }

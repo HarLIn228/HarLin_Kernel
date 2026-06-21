@@ -7,6 +7,10 @@
 #include "fat32.h"
 #include "chc_loader.h"
 #include "pipe.h"
+#include "rtc.h"
+#include "smp.h"
+#include "kmalloc.h"
+#include "interrupt.h"
 
 #define USER_ADDR_START 0x400000
 #define USER_ADDR_END   0x800000
@@ -31,7 +35,7 @@ struct syscall_regs {
 
 typedef unsigned long (*syscall_t)(struct syscall_regs* r);
 
-#define MAX_OPEN_FILES 4
+#define MAX_OPEN_FILES 8
 static struct Harlin_File open_files[MAX_OPEN_FILES];
 static int file_in_use[MAX_OPEN_FILES];
 
@@ -78,16 +82,16 @@ static unsigned long sys_getc(struct syscall_regs* r)
     unsigned char sc;
     char ch;
     for (;;) {
-        Harlin_IntOff();
+        interrupts_disable();
         if (keyboard_has_data()) {
             sc = keyboard_poll();
-            Harlin_IntOn();
+            interrupts_enable();
             if (sc) {
                 ch = keyboard_scancode_to_ascii(sc);
                 if (ch) return (unsigned long)ch;
             }
         } else {
-            Harlin_IntOn();
+            interrupts_enable();
             asm volatile ("hlt");
         }
     }
@@ -306,14 +310,126 @@ static unsigned long sys_pipe_close(struct syscall_regs* r)
 
 static unsigned long sys_sleep(struct syscall_regs* r)
 {
-    unsigned long ms = r->rdi;
-    volatile unsigned long i;
-    unsigned long j;
-    for (j = 0; j < ms; j++) {
-        for (i = 0; i < 50000; i++) {
-            asm volatile ("" : : : "memory");
+    scheduler_sleep((u32)r->rdi);
+    return 0;
+}
+
+static unsigned long sys_getpid(struct syscall_regs* r)
+{
+    struct process* proc = process_current();
+    if (!proc)
+        return (unsigned long)-1;
+    return (unsigned long)proc->pid;
+}
+
+static unsigned long sys_getcpu(struct syscall_regs* r)
+{
+    return (unsigned long)smp_current_cpu_id();
+}
+
+static unsigned long sys_time(struct syscall_regs* r)
+{
+    struct rtc_time* out = (struct rtc_time*)r->rdi;
+    if (!out || !user_ptr_valid((u64)out, sizeof(*out)))
+        return (unsigned long)-1;
+    rtc_read(out);
+    return 0;
+}
+
+static unsigned long sys_beep(struct syscall_regs* r)
+{
+    extern void speaker_beep(u32 freq, u32 ms);
+    speaker_beep((u32)r->rdi, (u32)r->rsi);
+    return 0;
+}
+
+static unsigned long sys_kmalloc(struct syscall_regs* r)
+{
+    if (r->rdi == 0 || r->rdi > 0x100000)
+        return 0;
+    return (unsigned long)kmalloc(r->rdi);
+}
+
+static unsigned long sys_kfree(struct syscall_regs* r)
+{
+    void* ptr = (void*)r->rdi;
+    if (!ptr)
+        return 0;
+    if (r->rdi < 0xFFFF800000000000 || r->rdi >= 0xFFFF800010000000)
+        return (unsigned long)-1;
+    kfree(ptr);
+    return 0;
+}
+
+static unsigned long sys_mmap(struct syscall_regs* r)
+{
+    u64 virt = r->rdi;
+    u64 size = r->rsi;
+    u64 pages;
+    u64 i;
+    struct process* proc;
+    if (virt < USER_ADDR_START || virt + size > USER_ADDR_END || virt + size < virt)
+        return (unsigned long)-1;
+    proc = process_current();
+    if (!proc)
+        return (unsigned long)-1;
+    pages = (size + 4095) / 4096;
+    for (i = 0; i < pages; i++) {
+        u64 phys = pmm_alloc();
+        if (!phys) {
+            while (i > 0) {
+                i--;
+                u64 p = vmm_get_phys(virt + i * 4096);
+                vmm_unmap(virt + i * 4096);
+                if (p) pmm_free(p);
+            }
+            return (unsigned long)-1;
+        }
+        vmm_map(virt + i * 4096, phys, VMM_PRESENT | VMM_WRITABLE | VMM_USER);
+        if (proc->page_count < 16) {
+            proc->user_vaddrs[proc->page_count] = virt + i * 4096;
+            proc->user_pages[proc->page_count++] = phys;
         }
     }
+    return virt;
+}
+
+static unsigned long sys_munmap(struct syscall_regs* r)
+{
+    u64 virt = r->rdi;
+    u64 size = r->rsi;
+    u64 pages;
+    u64 i;
+    if (virt < USER_ADDR_START || virt + size > USER_ADDR_END)
+        return (unsigned long)-1;
+    pages = (size + 4095) / 4096;
+    for (i = 0; i < pages; i++) {
+        u64 p = vmm_get_phys(virt + i * 4096);
+        vmm_unmap(virt + i * 4096);
+        if (p) pmm_free(p);
+    }
+    return 0;
+}
+
+static unsigned long sys_getkeystate(struct syscall_regs* r)
+{
+    return (unsigned long)keyboard_get_state();
+}
+
+static unsigned long sys_keyled(struct syscall_regs* r)
+{
+    keyboard_set_leds((u8)r->rdi);
+    return 0;
+}
+
+static unsigned long sys_set_priority(struct syscall_regs* r)
+{
+    struct process* proc = process_current();
+    if (!proc)
+        return (unsigned long)-1;
+    proc->priority = (u32)r->rdi;
+    if (proc->priority == 0)
+        proc->priority = 1;
     return 0;
 }
 
@@ -335,6 +451,17 @@ static syscall_t syscall_table[] = {
     [HARLIN_SYS_PIPE_WRITE]  = sys_pipe_write,
     [HARLIN_SYS_PIPE_CLOSE]  = sys_pipe_close,
     [HARLIN_SYS_PIPE_READY]  = sys_pipe_ready,
+    [HARLIN_SYS_GETPID]      = sys_getpid,
+    [HARLIN_SYS_GETCPU]      = sys_getcpu,
+    [HARLIN_SYS_TIME]        = sys_time,
+    [HARLIN_SYS_BEEP]        = sys_beep,
+    [HARLIN_SYS_KMALLOC]     = sys_kmalloc,
+    [HARLIN_SYS_KFREE]       = sys_kfree,
+    [HARLIN_SYS_MMAP]        = sys_mmap,
+    [HARLIN_SYS_UNMAP]       = sys_munmap,
+    [HARLIN_SYS_GETKEYSTATE] = sys_getkeystate,
+    [HARLIN_SYS_KEYLED]      = sys_keyled,
+    [HARLIN_SYS_SETPRIORITY] = sys_set_priority,
 };
 
 #define SYSCALL_COUNT (sizeof(syscall_table) / sizeof(syscall_table[0]))

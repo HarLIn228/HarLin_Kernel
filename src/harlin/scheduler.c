@@ -3,14 +3,19 @@
 #include "io.h"
 #include "pmm.h"
 #include "vmm.h"
+#include "spinlock.h"
+#include "rtc.h"
 
 #define USER_CS 0x2B
 #define USER_SS 0x33
 
-#define MAX_PROCESSES 8
+#define MAX_PROCESSES 16
+#define DEFAULT_TIME_SLICE 10
 
 static struct process processes[MAX_PROCESSES];
 static int current_process = -1;
+static struct spinlock scheduler_lock;
+static u32 tick_count = 0;
 
 extern void jump_to_user(u64 rip, u64 rsp, u64 rdi);
 
@@ -37,18 +42,23 @@ static void process_free_pages(int pid)
 void scheduler_init(void)
 {
     int i;
+    spinlock_init(&scheduler_lock);
     for (i = 0; i < MAX_PROCESSES; i++) {
         processes[i].state = PROC_STATE_NONE;
-    }
-    current_process = -1;
-    for (i = 0; i < MAX_PROCESSES; i++) {
+        processes[i].pid = i;
+        processes[i].cpu = -1;
+        processes[i].priority = 1;
+        processes[i].time_slice = DEFAULT_TIME_SLICE;
+        processes[i].sleep_until = 0;
         processes[i].next_alloc_virt = 0;
     }
+    current_process = -1;
 }
 
 int process_create(u64 rip, u64 rsp)
 {
     int i;
+    spinlock_acquire(&scheduler_lock);
     for (i = 0; i < MAX_PROCESSES; i++) {
         if (processes[i].state == PROC_STATE_NONE) {
             processes[i].rip = rip;
@@ -58,9 +68,15 @@ int process_create(u64 rip, u64 rsp)
             processes[i].first_run = 1;
             processes[i].page_count = 0;
             processes[i].next_alloc_virt = 0;
+            processes[i].cpu = -1;
+            processes[i].priority = 1;
+            processes[i].time_slice = DEFAULT_TIME_SLICE;
+            processes[i].sleep_until = 0;
+            spinlock_release(&scheduler_lock);
             return i;
         }
     }
+    spinlock_release(&scheduler_lock);
     return -1;
 }
 
@@ -84,35 +100,45 @@ void process_set_current(int pid)
         current_process = pid;
 }
 
-void schedule(void)
+static int pick_next_process(void)
 {
     int i;
+    int best = -1;
+    u32 best_prio = 0;
+    for (i = 0; i < MAX_PROCESSES; i++) {
+        if (processes[i].state == PROC_STATE_READY || processes[i].state == PROC_STATE_RUNNING) {
+            if (best < 0 || processes[i].priority > best_prio) {
+                best = i;
+                best_prio = processes[i].priority;
+            }
+        }
+    }
+    return best;
+}
+
+void schedule(void)
+{
     int next = -1;
     unsigned long long flags;
 
-    asm volatile ("pushf; pop %0; cli" : "=r"(flags) : : "memory");
+    asm volatile ("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
 
-    if (current_process >= 0) {
+    if (current_process >= 0 && processes[current_process].state == PROC_STATE_RUNNING)
         processes[current_process].state = PROC_STATE_READY;
-        current_process = -1;
-    }
+    current_process = -1;
 
-    for (i = 0; i < MAX_PROCESSES; i++) {
-        if (processes[i].state == PROC_STATE_READY) {
-            next = i;
-            break;
-        }
-    }
+    next = pick_next_process();
 
     if (next < 0) {
-        asm volatile ("push %0; popf" : : "r"(flags) : "memory");
+        asm volatile ("pushq %0; popfq" : : "r"(flags) : "memory");
         asm volatile ("sti; hlt; cli" : : : "memory");
         return;
     }
 
     current_process = next;
     processes[next].state = PROC_STATE_RUNNING;
-    asm volatile ("push %0; popf" : : "r"(flags) : "memory");
+    processes[next].time_slice = DEFAULT_TIME_SLICE;
+    asm volatile ("pushq %0; popfq" : : "r"(flags) : "memory");
     jump_to_user(processes[next].rip, processes[next].rsp, 0);
 }
 
@@ -121,18 +147,56 @@ void process_exit(void)
 {
     unsigned long long flags;
 
-    asm volatile ("pushf; pop %0; cli" : "=r"(flags) : : "memory");
+    asm volatile ("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
     if (current_process >= 0 && current_process < MAX_PROCESSES) {
         process_free_pages(current_process);
         processes[current_process].state = PROC_STATE_NONE;
         current_process = -1;
     }
-    asm volatile ("push %0; popf" : : "r"(flags) : "memory");
+    asm volatile ("pushq %0; popfq" : : "r"(flags) : "memory");
 
     schedule();
     for (;;) {
         asm volatile ("cli; hlt");
     }
+}
+
+void scheduler_tick(void)
+{
+    int i;
+    tick_count++;
+    for (i = 0; i < MAX_PROCESSES; i++) {
+        if (processes[i].state == PROC_STATE_SLEEPING) {
+            if (processes[i].sleep_until && tick_count >= processes[i].sleep_until)
+                processes[i].state = PROC_STATE_READY;
+        }
+    }
+}
+
+void scheduler_add_ready(int pid)
+{
+    if (pid >= 0 && pid < MAX_PROCESSES)
+        processes[pid].state = PROC_STATE_READY;
+}
+
+void scheduler_sleep(u32 ms)
+{
+    if (current_process < 0 || current_process >= MAX_PROCESSES)
+        return;
+    processes[current_process].sleep_until = tick_count + ms;
+    processes[current_process].state = PROC_STATE_SLEEPING;
+    schedule();
+}
+
+int scheduler_get_load(int cpu)
+{
+    int i;
+    int count = 0;
+    for (i = 0; i < MAX_PROCESSES; i++) {
+        if (processes[i].state != PROC_STATE_NONE && (cpu < 0 || processes[i].cpu == cpu))
+            count++;
+    }
+    return count;
 }
 
 void timer_init(void)
@@ -148,6 +212,8 @@ void timer_handler(unsigned long* frame)
 {
     int next;
     struct process* cur;
+
+    scheduler_tick();
 
     if (current_process < 0 || current_process >= MAX_PROCESSES)
         return;
@@ -173,20 +239,25 @@ void timer_handler(unsigned long* frame)
     cur->rflags = frame[18];
     cur->rsp    = frame[19];
 
+    if (cur->time_slice > 0)
+        cur->time_slice--;
+
+    if (cur->time_slice > 0 && cur->state == PROC_STATE_RUNNING)
+        return;
+
     cur->state = PROC_STATE_READY;
 
-    next = (current_process + 1) % MAX_PROCESSES;
-    while (next != current_process && processes[next].state != PROC_STATE_READY) {
-        next = (next + 1) % MAX_PROCESSES;
-    }
+    next = pick_next_process();
 
-    if (next == current_process) {
+    if (next < 0 || next == current_process) {
         cur->state = PROC_STATE_RUNNING;
+        cur->time_slice = DEFAULT_TIME_SLICE;
         return;
     }
 
     current_process = next;
     processes[next].state = PROC_STATE_RUNNING;
+    processes[next].time_slice = DEFAULT_TIME_SLICE;
 
     if (!processes[next].first_run) {
         frame[0]  = processes[next].rax;

@@ -51,6 +51,28 @@ typedef signed long long   s64;
 #define HARLIN_SYS_PIPE_WRITE   14
 #define HARLIN_SYS_PIPE_CLOSE   15
 #define HARLIN_SYS_PIPE_READY   16
+#define HARLIN_SYS_GETPID       17
+#define HARLIN_SYS_GETCPU       18
+#define HARLIN_SYS_TIME         19
+#define HARLIN_SYS_BEEP         20
+#define HARLIN_SYS_KMALLOC      21
+#define HARLIN_SYS_KFREE        22
+#define HARLIN_SYS_MMAP         23
+#define HARLIN_SYS_UNMAP        24
+#define HARLIN_SYS_GETKEYSTATE  25
+#define HARLIN_SYS_KEYLED       26
+#define HARLIN_SYS_SETPRIORITY  27
+
+#define HARLIN_KEY_SHIFT  0x01
+#define HARLIN_KEY_CTRL   0x02
+#define HARLIN_KEY_ALT    0x04
+#define HARLIN_KEY_CAPS   0x08
+#define HARLIN_KEY_NUM    0x10
+#define HARLIN_KEY_SCROLL 0x20
+
+#define HARLIN_LED_SCROLL 0x01
+#define HARLIN_LED_NUM    0x02
+#define HARLIN_LED_CAPS   0x04
 
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
@@ -74,12 +96,14 @@ void Harlin_PortOut8(u16 port, u8 data);
 void Harlin_PortOut16(u16 port, u16 data);
 void Harlin_PortOut32(u16 port, u32 data);
 
-void Harlin_IntOn(void);
-void Harlin_IntOff(void);
+
 
 int  Harlin_KeyAvail(void);
 char Harlin_GetKey(void);
 int  Harlin_KeyOverflow(void);
+void Harlin_KeyFlush(void);
+u8   Harlin_KeyState(void);
+void Harlin_KeyLed(u8 leds);
 
 u32  Harlin_Len(const char* str);
 void Harlin_CopyStr(char* dst, const char* src);
@@ -101,6 +125,38 @@ void Harlin_InitVmm(u64 pml4_phys);
 void Harlin_Map(u64 virt, u64 phys, u64 flags);
 void Harlin_Unmap(u64 virt);
 u64  Harlin_ToPhys(u64 virt);
+
+void Harlin_InitKmalloc(void);
+void* Harlin_Kmalloc(u64 size);
+void  Harlin_Kfree(void* ptr);
+void* Harlin_Krealloc(void* ptr, u64 size);
+u64   Harlin_Ksize(void* ptr);
+
+void Harlin_InitSmp(void);
+int  Harlin_CpuCount(void);
+int  Harlin_CurrentCpu(void);
+void Harlin_SendIpi(int cpu, u8 vector);
+
+struct Harlin_Spinlock {
+    volatile u32 lock;
+};
+
+void Harlin_SpinlockInit(struct Harlin_Spinlock* lk);
+void Harlin_SpinlockAcquire(struct Harlin_Spinlock* lk);
+void Harlin_SpinlockRelease(struct Harlin_Spinlock* lk);
+
+struct Harlin_RtcTime {
+    u8 second;
+    u8 minute;
+    u8 hour;
+    u8 day;
+    u8 month;
+    u16 year;
+};
+
+void Harlin_InitRtc(void);
+void Harlin_RtcRead(struct Harlin_RtcTime* out);
+u64  Harlin_RtcBootSeconds(void);
 
 int Harlin_InitDisk(void);
 int Harlin_ReadSectors(u64 lba, u8 count, void* buf);
@@ -143,5 +199,9 @@ int  Harlin_ReadPipe(struct Harlin_Pipe* pipe, void* buf, u32 len);
 int  Harlin_WritePipe(struct Harlin_Pipe* pipe, const void* buf, u32 len);
 int  Harlin_ReadyPipe(struct Harlin_Pipe* pipe);
 void Harlin_ClosePipe(struct Harlin_Pipe* pipe);
+
+int  Harlin_GetPid(void);
+void Harlin_SetPriority(u32 priority);
+void Harlin_Beep(u32 freq, u32 ms);
 
 #endif

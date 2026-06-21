@@ -15,13 +15,8 @@ struct idt_entry {
     unsigned int reserved;
 } __attribute__((packed));
 
-struct idt_ptr {
-    unsigned short limit;
-    unsigned long base;
-} __attribute__((packed));
-
 static struct idt_entry idt[256];
-static struct idt_ptr idtp;
+struct idt_ptr idtp;
 
 extern void isr0(void);
 extern void isr1(void);
@@ -113,7 +108,7 @@ void idt_init(void)
     for (i = 0; i < 16; i++) {
         idt_set_gate(0x20 + i, (unsigned long)irq_stubs[i], GDT_KERNEL_CODE, 0x8E);
     }
-    idt_set_gate(0x80, (unsigned long)syscall_stub, GDT_KERNEL_CODE, 0xEE);
+    idt_set_gate(0x80, (unsigned long)syscall_stub, GDT_KERNEL_CODE, 0xEF);
     idtp.limit = sizeof(idt) - 1;
     idtp.base = (unsigned long)&idt;
     idt_load(&idtp);

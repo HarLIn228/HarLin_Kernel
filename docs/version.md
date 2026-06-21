@@ -1,7 +1,29 @@
 # HarLin Kernel 版本历史
 
 本项目采用 CalVer 版本号，格式为 `YY.D.X`：
-## H26.2.1（最新）
+## H26.3（最新）
+
+- 大版本发布：新增多核 SMP 启动、自旋锁/原子操作、per-cpu 变量、更完善的调度器、更多系统调用、动态内存分配 kmalloc、RTC 时钟、扩展键盘功能
+- 新增多核 SMP 启动：Local APIC 初始化、IPI 发送、AP 引导 trampoline
+- 新增 spinlock 与原子操作：xchg/add/sub/cmpxchg
+- 新增 per-cpu 变量支持
+- 调度器增强：优先级调度、时间片轮转、就绪/睡眠队列
+- 新增系统调用：getpid、getcpu、time、beep、kmalloc、kfree、mmap、unmap、getkeystate、keyled、setpriority
+- 新增动态内存分配器 kmalloc/kfree/krealloc/ksize
+- 新增 RTC 时钟读取 API
+- 扩展键盘功能：LED 控制、修饰键状态、缓冲区清空、扫描码集切换
+- 修复系统调用门使用陷阱门（0xEF），避免系统调用时清除中断标志
+- 修复 SMP SIPI 向量传递错误
+- 修复 SMP AP 启动时未设置 TSS RSP0 的问题，每个 CPU 使用独立 GDT/TSS
+- 修复 pipe.c、kmalloc.c、network.c 中物理地址直接当作虚拟地址使用的问题
+- 修复 PMM 位图未标记内核与位图自身占用内存的问题
+- 修复 vmm_map 对用户态虚拟地址范围缺少校验的问题
+- 修复 syscall.c 中 sys_kmalloc / sys_kfree 参数校验缺失
+- 修复 FAT32 目录查找遇到空条目提前返回导致漏找文件的问题
+- 从公开 API 中移除 Harlin_IntOn / Harlin_IntOff，避免用户态调用
+- 更新 `HarLin_API_Spec.md`、`手册.md`、`HarLin_CHC_Format.md`、`HCC.md` 文档
+
+## H26.2.1
 
 - 项目根目录由 `HarLIn_Boot` 重命名为 `Kernel`
 - 优化源码目录结构：`src/ASM` -> `src/asm`、`src/Sys_C` -> `src/harlin`、`tools` -> `hcc`

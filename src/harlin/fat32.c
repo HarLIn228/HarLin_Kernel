@@ -213,7 +213,7 @@ int Harlin_Open(const char* name, struct Harlin_File* out)
             u8* entry = &cluster_buf[i];
 
             if (entry[0] == 0)
-                return HARLIN_FS_ERROR;
+                break;
 
             if (filename_match(name, entry)) {
                 out->start_cluster = ((u32)read_le16(&entry[0x14]) << 16) | read_le16(&entry[0x1A]);
