@@ -37,7 +37,7 @@ hcc app/main.c -o app/main.chc -e kernel_main
 - 入口函数默认名为 `_start`
 - 使用 `harlin_print` 输出字符串
 - 使用 `harlin_exit` 结束程序
-- H26.3 头文件新增 `harlin_getpid`、`harlin_getcpu`、`harlin_time`、`harlin_beep`、`harlin_kmalloc`、`harlin_kfree`、`harlin_mmap`、`harlin_unmap`、`harlin_key_state`、`harlin_key_led`、`harlin_set_priority` 等包装函数
+- 头文件提供 `harlin_getpid`、`harlin_getcpu`、`harlin_time`、`harlin_beep`、`harlin_kmalloc`、`harlin_kfree`、`harlin_mmap`、`harlin_unmap`、`harlin_key_state`、`harlin_key_led`、`harlin_set_priority` 等包装函数
 
 ## 最小示例
 

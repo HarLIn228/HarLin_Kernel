@@ -1,12 +1,13 @@
 # HarLin Kernel
 
-HarLin Kernel 是由 HarLin228 Studio 独立开发的 x86_64 通用操作系统内核。
+HarLin Kernel 是由 HarLin 独立开发的 x86_64 通用操作系统内核。
 
 本项目采用统一 API 层设计，提供基础硬件抽象与驱动接口，便于第三方开发者基于本内核进行二次开发、功能扩展与再发布。
 
 详细更新内容请查看 `docs/version.md`。
 
-本项目采取覆盖式提交，不保留旧版本代码，但在 Version 中记录历史。
+
+### 注意：HarLin Kernel 为独立操作系统内核，不基于 Linux，也不兼容 Linux 可执行文件、Linux 系统调用或 Linux 驱动程序
 
 ## 主要特性
 
@@ -69,6 +70,6 @@ cd Kernel
 
 ## 开源协议
 
-本项目基于 MIT 开源协议发布。
+本项目基于 MIT`LICENSE` 开源协议发布。
 
 © 2026 HarLin228 Studio
