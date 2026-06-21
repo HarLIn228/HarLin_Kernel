@@ -4,6 +4,9 @@
 #include "pmm.h"
 #include "vmm.h"
 
+#define USER_CS 0x2B
+#define USER_SS 0x33
+
 #define MAX_PROCESSES 8
 
 static struct process processes[MAX_PROCESSES];
@@ -52,6 +55,7 @@ int process_create(u64 rip, u64 rsp)
             processes[i].rsp = rsp;
             processes[i].rflags = 0x202;
             processes[i].state = PROC_STATE_READY;
+            processes[i].first_run = 1;
             processes[i].page_count = 0;
             processes[i].next_alloc_virt = 0;
             return i;
@@ -65,6 +69,19 @@ struct process* process_current(void)
     if (current_process < 0 || current_process >= MAX_PROCESSES)
         return 0;
     return &processes[current_process];
+}
+
+struct process* process_get(int pid)
+{
+    if (pid < 0 || pid >= MAX_PROCESSES)
+        return 0;
+    return &processes[pid];
+}
+
+void process_set_current(int pid)
+{
+    if (pid >= 0 && pid < MAX_PROCESSES)
+        current_process = pid;
 }
 
 void schedule(void)
@@ -137,21 +154,21 @@ void timer_handler(unsigned long* frame)
 
     cur = &processes[current_process];
 
-    cur->r15 = frame[0];
-    cur->r14 = frame[1];
-    cur->r13 = frame[2];
-    cur->r12 = frame[3];
-    cur->r11 = frame[4];
-    cur->r10 = frame[5];
-    cur->r9  = frame[6];
+    cur->rax = frame[0];
+    cur->rcx = frame[1];
+    cur->rdx = frame[2];
+    cur->rbx = frame[3];
+    cur->rbp = frame[4];
+    cur->rsi = frame[5];
+    cur->rdi = frame[6];
     cur->r8  = frame[7];
-    cur->rdi = frame[8];
-    cur->rsi = frame[9];
-    cur->rbp = frame[10];
-    cur->rbx = frame[11];
-    cur->rdx = frame[12];
-    cur->rcx = frame[13];
-    cur->rax = frame[14];
+    cur->r9  = frame[8];
+    cur->r10 = frame[9];
+    cur->r11 = frame[10];
+    cur->r12 = frame[11];
+    cur->r13 = frame[12];
+    cur->r14 = frame[13];
+    cur->r15 = frame[14];
     cur->rip    = frame[16];
     cur->rflags = frame[18];
     cur->rsp    = frame[19];
@@ -171,22 +188,27 @@ void timer_handler(unsigned long* frame)
     current_process = next;
     processes[next].state = PROC_STATE_RUNNING;
 
-    frame[0]  = processes[next].r15;
-    frame[1]  = processes[next].r14;
-    frame[2]  = processes[next].r13;
-    frame[3]  = processes[next].r12;
-    frame[4]  = processes[next].r11;
-    frame[5]  = processes[next].r10;
-    frame[6]  = processes[next].r9;
-    frame[7]  = processes[next].r8;
-    frame[8]  = processes[next].rdi;
-    frame[9]  = processes[next].rsi;
-    frame[10] = processes[next].rbp;
-    frame[11] = processes[next].rbx;
-    frame[12] = processes[next].rdx;
-    frame[13] = processes[next].rcx;
-    frame[14] = processes[next].rax;
+    if (!processes[next].first_run) {
+        frame[0]  = processes[next].rax;
+        frame[1]  = processes[next].rcx;
+        frame[2]  = processes[next].rdx;
+        frame[3]  = processes[next].rbx;
+        frame[4]  = processes[next].rbp;
+        frame[5]  = processes[next].rsi;
+        frame[6]  = processes[next].rdi;
+        frame[7]  = processes[next].r8;
+        frame[8]  = processes[next].r9;
+        frame[9]  = processes[next].r10;
+        frame[10] = processes[next].r11;
+        frame[11] = processes[next].r12;
+        frame[12] = processes[next].r13;
+        frame[13] = processes[next].r14;
+        frame[14] = processes[next].r15;
+    }
+    processes[next].first_run = 0;
     frame[16] = processes[next].rip;
+    frame[17] = USER_CS;
     frame[18] = processes[next].rflags;
     frame[19] = processes[next].rsp;
+    frame[20] = USER_SS;
 }

@@ -19,17 +19,34 @@ set ERR=%RED%[Error]%RESET%
 
 set CC=x86_64-w64-mingw32-gcc
 set LD=ld
-set CFLAGS=-ffreestanding -c -m64 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -mno-sse -mno-mmx -mabi=sysv
+set CFLAGS=-ffreestanding -c -m64 -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -I build -mno-sse -mno-mmx -mabi=sysv
 
 set TOTAL=0
-for %%f in (src\ASM\*.asm) do set /a TOTAL+=1
-for %%f in (src\Sys_C\*.c) do set /a TOTAL+=1
+for %%f in (src\asm\*.asm) do set /a TOTAL+=1
+for %%f in (src\harlin\*.c) do set /a TOTAL+=1
 set COUNT=0
 
 if exist build rmdir /s /q build
 if not exist build mkdir build
 
-nasm -f bin src\ASM\boot.asm -o build\boot.bin 2>build\error.log
+.\bin\HCC.exe tests\hello.c -o build\init.chc >nul 2>build\error.log
+if errorlevel 1 (
+    echo %FAILURE% Creating init.chc
+    echo %ERR%
+    type build\error.log
+    goto error
+)
+.\bin\bin2h.exe build\init.chc build\init_chc.h init_chc_data >nul 2>build\error.log
+if errorlevel 1 (
+    echo %FAILURE% Creating init_chc.h
+    echo %ERR%
+    type build\error.log
+    goto error
+)
+
+echo %SUCCESS% Created init.chc
+
+nasm -f bin src\asm\boot.asm -o build\boot.bin 2>build\error.log
 if errorlevel 1 (
     echo %FAILURE% Compiling boot.asm
     echo %ERR%
@@ -40,7 +57,7 @@ set /a COUNT+=1
 echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling boot.asm
 
 set OBJS=
-for %%f in (src\ASM\*.asm) do (
+for %%f in (src\asm\*.asm) do (
     set FILENAME=%%~nf
     if /I "!FILENAME!" neq "boot" (
         nasm -f win64 %%f -o build\asm_!FILENAME!.o 2>build\error.log
@@ -56,7 +73,7 @@ for %%f in (src\ASM\*.asm) do (
     )
 )
 
-for %%f in (src\Sys_C\*.c) do (
+for %%f in (src\harlin\*.c) do (
     set FILENAME=%%~nf
     %CC% %CFLAGS% -o build\!FILENAME!.o %%f 2>build\error.log
     if errorlevel 1 (
@@ -70,7 +87,7 @@ for %%f in (src\Sys_C\*.c) do (
     set OBJS=!OBJS! build\!FILENAME!.o
 )
 
-%LD% -T src\Sys_C\linker.ld -o build\kernel.tmp %OBJS% -m i386pep -nostdlib 2>build\error.log
+%LD% -T src\harlin\linker.ld -o build\kernel.tmp %OBJS% -m i386pep -nostdlib 2>build\error.log
 if errorlevel 1 (
     echo %FAILURE% Linking kernel
     echo %ERR%
@@ -104,7 +121,7 @@ if errorlevel 1 (
 )
 echo %SUCCESS% Creating disk image
 
-del build\kernel.tmp 2>nul
+rem del build\kernel.tmp 2>nul
 del build\asm_*.o 2>nul
 del build\*.o 2>nul
 if exist build\error.log del build\error.log

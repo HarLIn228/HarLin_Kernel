@@ -14,8 +14,11 @@ static void clear_page(u64 addr)
 static u64* get_or_alloc_table(u64* entry, u64 flags)
 {
     u64 page;
-    if (*entry & VMM_PRESENT)
+    if (*entry & VMM_PRESENT) {
+        if ((flags & VMM_USER) && !(*entry & VMM_USER))
+            *entry |= VMM_USER;
         return (u64*)(*entry & 0xFFFFFFFFFF000);
+    }
     page = pmm_alloc();
     if (!page)
         return 0;

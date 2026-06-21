@@ -163,6 +163,8 @@ static void print_hex64(unsigned long val)
 
 void isr_handler(unsigned int vector, unsigned long error_code)
 {
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"('E'));
+    __asm__ volatile ("outb %b0, $0xE9" : : "a"((unsigned char)('0' + vector)));
     interrupts_disable();
     screen_put_char('E');
     screen_put_char('X');

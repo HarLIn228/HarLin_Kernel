@@ -135,10 +135,10 @@ setup_vesa:
 disk_error:
     jmp $
 
-%include "src/ASM/delay.asm"
-%include "src/ASM/a20.asm"
-%include "src/ASM/speaker.asm"
-%include "src/ASM/gdt.asm"
+%include "src/asm/delay.asm"
+%include "src/asm/a20.asm"
+%include "src/asm/speaker.asm"
+%include "src/asm/gdt.asm"
 
 times 510-($-$$) db 0
 dw 0xAA55

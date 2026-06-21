@@ -12,21 +12,21 @@
 #define USER_ADDR_END   0x800000
 
 struct syscall_regs {
-    unsigned long rax;
-    unsigned long rcx;
-    unsigned long rdx;
-    unsigned long rbx;
-    unsigned long rbp;
-    unsigned long rsi;
-    unsigned long rdi;
-    unsigned long r8;
-    unsigned long r9;
-    unsigned long r10;
-    unsigned long r11;
-    unsigned long r12;
-    unsigned long r13;
-    unsigned long r14;
-    unsigned long r15;
+    u64 rax;
+    u64 rcx;
+    u64 rdx;
+    u64 rbx;
+    u64 rbp;
+    u64 rsi;
+    u64 rdi;
+    u64 r8;
+    u64 r9;
+    u64 r10;
+    u64 r11;
+    u64 r12;
+    u64 r13;
+    u64 r14;
+    u64 r15;
 };
 
 typedef unsigned long (*syscall_t)(struct syscall_regs* r);
@@ -67,7 +67,8 @@ static unsigned long sys_print(struct syscall_regs* r)
     if (!user_ptr_valid((u64)str, len + 1))
         return (unsigned long)-1;
     while (*str) {
-        screen_put_char(*str++);
+        char c = *str++;
+        screen_put_char(c);
     }
     return 0;
 }

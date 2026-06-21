@@ -38,9 +38,9 @@ pic_init:
     out 0xA1, al
     out 0x80, al
 
-    mov al, 0xF9
+    mov al, 0xF8
     out 0x21, al
-    mov al, 0xB7
+    mov al, 0xFF
     out 0xA1, al
 
     pop rax

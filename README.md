@@ -42,7 +42,7 @@ HarLin Kernel 是由 HarLin228 Studio 独立开发的 x86_64 通用操作系统�
 ### 构建与运行
 
 ```powershell
-cd D:\Code\Code\HarLIn_Boot
+cd D:\Code\Code\Kernel
 .\build.bat
 .\run.bat
 ```

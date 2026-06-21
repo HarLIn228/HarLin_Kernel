@@ -1,7 +1,18 @@
 # HarLin Kernel 版本历史
 
 本项目采用 CalVer 版本号，格式为 `YY.D.X`：
-## H26.2（最新）
+## H26.2.1（最新）
+
+- 项目根目录由 `HarLIn_Boot` 重命名为 `Kernel`
+- 优化源码目录结构：`src/ASM` -> `src/asm`、`src/Sys_C` -> `src/harlin`、`tools` -> `hcc`
+- 新增 `bin/` 目录存放可执行工具
+- 修复了运行chc程序崩溃的问题
+- 新增 HCC 编译器
+- 新增 `bin2h` 工具，用于将二进制文件转换为 C 头文件数组
+- 新增 `docs/HCC.md` 文档，说明 HCC 命令用法与示例
+- 新增test文件夹
+
+## H26.2
 
 - 大版本发布：内核启动崩溃 bug 已修复，API 与可执行格式完成重构
 - 简化 HarLin_API 命名，让 API 更短更易记（如 `Harlin_ConPrint` -> `Harlin_Print`、`Harlin_FsOpen` -> `Harlin_Open`）

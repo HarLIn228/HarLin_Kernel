@@ -14,6 +14,7 @@ struct process {
     u64 rsp;
     u64 rflags;
     int state;
+    int first_run;
     u64 user_pages[16];
     u64 user_vaddrs[16];
     int page_count;
@@ -22,6 +23,8 @@ struct process {
 
 void scheduler_init(void);
 int  process_create(u64 rip, u64 rsp);
+struct process* process_get(int pid);
+void process_set_current(int pid);
 void schedule(void);
 void process_exit(void) __attribute__((noreturn));
 struct process* process_current(void);

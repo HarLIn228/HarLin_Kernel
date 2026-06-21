@@ -114,18 +114,22 @@ int chc_load(const void* file_data, u64 file_size)
     u64 code_pages;
     u64 i;
     int r;
+    int pid;
 
     if (!header_valid(hdr, file_size))
-        return -1;
-
-    proc = process_current();
-    if (!proc)
         return -1;
 
     code_base = USER_CODE_BASE;
     code_pages = (hdr->code_size + 4095) & ~4095;
     data_base = code_base + code_pages;
     bss_base = data_base + ((hdr->data_size + 4095) & ~4095);
+
+    pid = process_create(code_base + hdr->entry_offset, USER_STACK_TOP);
+    if (pid < 0)
+        return -1;
+    proc = process_get(pid);
+    if (!proc)
+        return -1;
 
     if (map_user_pages(code_base, hdr->code_size, VMM_PRESENT | VMM_USER, proc) != 0)
         return -1;
@@ -170,7 +174,7 @@ int chc_load(const void* file_data, u64 file_size)
         *(u64*)(code_base + offset) += code_base;
     }
 
-    return process_create(code_base + hdr->entry_offset, USER_STACK_TOP);
+    return pid;
 
 fail_all:
     unmap_user_pages(stack_bottom, hdr->stack_size ? hdr->stack_size : 4096, proc);

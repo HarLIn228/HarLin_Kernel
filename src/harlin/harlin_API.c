@@ -13,6 +13,7 @@
 #include "chc_loader.h"
 #include "scheduler.h"
 #include "pipe.h"
+#include "init_chc.h"
 
 extern void screen_put_char(char c);
 
@@ -324,6 +325,16 @@ void Harlin_Boot(void)
     scheduler_init();
     timer_init();
     pipe_init();
+
+    {
+        int r = chc_load(init_chc_data, init_chc_data_size);
+        if (r < 0) {
+            Harlin_Print("init.chc load failed\n");
+        } else {
+            process_set_current(r);
+            schedule();
+        }
+    }
 
     for (;;) {
         Harlin_IntOn();
