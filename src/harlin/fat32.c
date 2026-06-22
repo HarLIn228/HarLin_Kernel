@@ -540,3 +540,44 @@ int Harlin_Create(const char* name, struct Harlin_File* out)
     out->dir_offset = dir_offset;
     return HARLIN_FS_OK;
 }
+
+int Harlin_DeleteFile(const char* name)
+{
+    u32 cluster = root_cluster;
+    u32 i;
+
+    if (!name)
+        return HARLIN_FS_ERROR;
+
+    while (cluster < FAT32_EOC) {
+        if (read_cluster(cluster, cluster_buf) != 0)
+            return HARLIN_FS_ERROR;
+
+        for (i = 0; i < bytes_per_sector * sectors_per_cluster; i += 32) {
+            u8* entry = &cluster_buf[i];
+
+            if (entry[0] == 0)
+                return HARLIN_FS_ERROR;
+
+            if (filename_match(name, entry)) {
+                u32 file_cluster = ((u32)read_le16(&entry[0x14]) << 16) | read_le16(&entry[0x1A]);
+
+                entry[0] = FAT32_DELETED;
+                if (write_cluster(cluster, cluster_buf) != 0)
+                    return HARLIN_FS_ERROR;
+
+                while (file_cluster >= 2 && file_cluster < FAT32_EOC) {
+                    u32 next = next_cluster(file_cluster);
+                    write_fat_entry(file_cluster, 0);
+                    file_cluster = next;
+                }
+
+                return HARLIN_FS_OK;
+            }
+        }
+
+        cluster = next_cluster(cluster);
+    }
+
+    return HARLIN_FS_ERROR;
+}

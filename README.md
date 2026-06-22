@@ -29,6 +29,8 @@ HarLin Kernel 是由 HarLin 独立开发的 x86_64 通用操作系统内核。
 - 系统调用（getpid、getcpu、time、beep、kmalloc、kfree、mmap、unmap 等）
 - RTC 实时时钟读取
 - 扩展键盘功能（LED、修饰键状态、扫描码集切换）
+- Sound Blaster 16 音频驱动与 WAV 播放
+- HarLin Shell（自定义命令集、变量、条件、跳转、执行 .chc）
 - ATA PIO 磁盘 I/O
 - MBR 分区表解析
 - FAT32 文件系统（读取、写入、创建）

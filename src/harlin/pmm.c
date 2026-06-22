@@ -42,6 +42,45 @@ u64 pmm_alloc(void)
     return 0;
 }
 
+u64 pmm_alloc_contiguous(u32 count)
+{
+    u32 i, j, k, found;
+    u32 total_bits;
+
+    if (count == 0)
+        return 0;
+
+    total_bits = PMM_TOTAL_PAGES;
+    for (i = 0; i < total_bits / 8; i++) {
+        if (bitmap[i] == 0xFF)
+            continue;
+        for (j = 0; j < 8; j++) {
+            if (bitmap[i] & (1 << j))
+                continue;
+            found = 1;
+            for (k = 1; k < count; k++) {
+                u32 idx = (i * 8 + j + k);
+                if (idx >= total_bits) {
+                    found = 0;
+                    break;
+                }
+                if (bitmap[idx / 8] & (1 << (idx % 8))) {
+                    found = 0;
+                    break;
+                }
+            }
+            if (found) {
+                for (k = 0; k < count; k++) {
+                    u32 idx = (i * 8 + j + k);
+                    bitmap[idx / 8] |= (1 << (idx % 8));
+                }
+                return PMM_BASE_ADDR + ((i * 8 + j) * PMM_PAGE_SIZE);
+            }
+        }
+    }
+    return 0;
+}
+
 void pmm_free(u64 addr)
 {
     u32 idx;

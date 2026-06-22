@@ -260,7 +260,36 @@ struct Harlin_RtcTime {
 void Harlin_InitRtc(void);
 void Harlin_RtcRead(struct Harlin_RtcTime* out);
 u64  Harlin_RtcBootSeconds(void);
+
+## 17. 音频 API
+
+```c
+int  Harlin_AudioInit(void);
+int  Harlin_AudioPlayWav(const u8* data, u32 len);
+void Harlin_AudioStop(void);
+int  Harlin_AudioIsPlaying(void);
 ```
+
+`Harlin_AudioInit` 初始化 Sound Blaster 16 声卡。
+`Harlin_AudioPlayWav` 播放一段内存中的 WAV 数据，目前支持 16-bit PCM。
+`Harlin_AudioStop` 立即停止当前播放。
+`Harlin_AudioIsPlaying` 返回当前是否正在播放。
+
+## 18. Shell API
+
+```c
+struct shell_command {
+    const char* name;
+    int (*handler)(int argc, char** argv);
+};
+
+void shell_run(void);
+int  Harlin_ShellRegister(const struct shell_command* cmd);
+```
+
+`shell_run` 启动 HarLin Shell。Shell 在内核初始化完成后调用，提供交互式命令行。
+
+`Harlin_ShellRegister` 向 Shell 注册一个外部命令。注册后，用户在 Shell 中输入该命令名即可调用对应的处理函数。命令名不能重复，不能与内置命令冲突。
 
 ## 19. 系统控制 API
 

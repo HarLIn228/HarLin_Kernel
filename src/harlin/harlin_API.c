@@ -17,6 +17,7 @@
 #include "spinlock.h"
 #include "kmalloc.h"
 #include "rtc.h"
+#include "shell.h"
 #include "init_chc.h"
 
 
@@ -401,18 +402,5 @@ void Harlin_Boot(void)
     Harlin_InitRtc();
     Harlin_InitSmp();
 
-    {
-        int r = chc_load(init_chc_data, init_chc_data_size);
-        if (r < 0) {
-            Harlin_Print("init.chc load failed\n");
-        } else {
-            process_set_current(r);
-            schedule();
-        }
-    }
-
-    for (;;) {
-        Harlin_IntOn();
-        asm volatile ("hlt");
-    }
+    shell_run();
 }

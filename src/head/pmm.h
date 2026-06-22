@@ -10,6 +10,7 @@
 
 void pmm_init(void);
 u64 pmm_alloc(void);
+u64 pmm_alloc_contiguous(u32 count);
 void pmm_free(u64 addr);
 
 #endif

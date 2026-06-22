@@ -158,6 +158,14 @@ void Harlin_InitRtc(void);
 void Harlin_RtcRead(struct Harlin_RtcTime* out);
 u64  Harlin_RtcBootSeconds(void);
 
+int  Harlin_AudioInit(void);
+int  Harlin_AudioPlayWav(const u8* data, u32 len);
+void Harlin_AudioStop(void);
+int  Harlin_AudioIsPlaying(void);
+
+struct shell_command;
+int Harlin_ShellRegister(const struct shell_command* cmd);
+
 int Harlin_InitDisk(void);
 int Harlin_ReadSectors(u64 lba, u8 count, void* buf);
 int Harlin_WriteSectors(u64 lba, u8 count, const void* buf);

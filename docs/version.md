@@ -1,7 +1,18 @@
 # HarLin Kernel 版本历史
 
 本项目采用 CalVer 版本号，格式为 `YY.D.X`：
-## H26.3（最新）
+## H26.3.1（最新）
+
+- 新增 Sound Blaster 16 音频驱动，支持 DMA 方式播放 16-bit PCM
+- 新增 WAV 文件解析器
+- 新增音频播放 API：Harlin_AudioInit、Harlin_AudioPlayWav、Harlin_AudioStop、Harlin_AudioIsPlaying
+- PMM 支持连续物理页分配 pmm_alloc_contiguous
+- 新增 HarLin Shell，支持 say/copy/setup/delete/cd/set/variable/constant/if/else/calculate/goto/run/end 等命令
+- Shell 支持外部命令注册 API：Harlin_ShellRegister
+- FAT32 支持文件删除：Harlin_DeleteFile
+- 更新 `README.md`、`手册.md`、`HarLin_API_Spec.md` 文档
+
+## H26.3
 
 - 大版本发布：新增多核 SMP 启动、自旋锁/原子操作、per-cpu 变量、更完善的调度器、更多系统调用、动态内存分配 kmalloc、RTC 时钟、扩展键盘功能
 - 新增多核 SMP 启动：Local APIC 初始化、IPI 发送、AP 引导 trampoline
@@ -12,6 +23,7 @@
 - 新增动态内存分配器 kmalloc/kfree/krealloc/ksize
 - 新增 RTC 时钟读取 API
 - 扩展键盘功能：LED 控制、修饰键状态、缓冲区清空、扫描码集切换
+- 新增 Sound Blaster 16 音频驱动，支持 WAV 播放
 - 修复系统调用门使用陷阱门（0xEF），避免系统调用时清除中断标志
 - 修复 SMP SIPI 向量传递错误
 - 修复 SMP AP 启动时未设置 TSS RSP0 的问题，每个 CPU 使用独立 GDT/TSS
