@@ -8,12 +8,23 @@
 #define VMM_USER     0x004
 #define VMM_HUGE     0x080
 
+#define KERNEL_PML4_VIRT  0xFF8000000000ULL
+#define ACPI_TABLE_VIRT   0xFFFF800000200000ULL
+#define ACPI_TABLE_END    0xFFFF800000210000ULL
+#define KERNEL_STACK_BASE 0xFFFF800001000000ULL
+#define KERNEL_STACK_SIZE 0x4000ULL
+#define KERNEL_STACK_TOP  0xFFFF800002000000ULL
+
 void vmm_init(u64 pml4_phys);
-void vmm_map(u64 virt, u64 phys, u64 flags);
+int  vmm_map(u64 virt, u64 phys, u64 flags);
 void vmm_unmap(u64 virt);
 u64 vmm_get_phys(u64 virt);
 int vmm_mapped(u64 virt);
 int vmm_unmap_and_free(u64 virt);
+
+void vmm_switch(u64 pml4_phys);
+u64 vmm_current_pml4(void);
+u64 vmm_clone_kernel_pml4(void);
 
 extern u64 vmm_last_replaced_phys;
 

@@ -3,6 +3,7 @@
 #include "io.h"
 #include "pmm.h"
 #include "screen.h"
+#include "vmm.h"
 
 #define UHCI_TOKEN(addr, endpt, pid, toggle, maxlen) \
     (((u32)(addr) & 0x7f) | (((u32)(endpt) & 0x0f) << 7) | \
@@ -110,12 +111,35 @@ static int uhci_port_status(struct uhci_controller* ctrl, int port)
     return uhci_readw(ctrl, reg);
 }
 
+static void* uhci_phys_to_virt(u64 phys)
+{
+    u64 virt = phys + 0xFFFF800000000000ULL;
+    if (phys == 0)
+        return (void*)0;
+    if (!vmm_mapped(virt)) {
+        if (vmm_map(virt, phys, VMM_PRESENT | VMM_WRITABLE) != 0)
+            return (void*)0;
+    }
+    return (void*)virt;
+}
+
 static u64 uhci_alloc_phys_page(void)
 {
     u64 page = pmm_alloc_contiguous_low(1);
-    if (page)
-        Harlin_Fill((void*)(page + 0xFFFF800000000000ULL), 0, 4096);
+    if (page) {
+        if (!uhci_phys_to_virt(page)) {
+            pmm_free(page);
+            return 0;
+        }
+    }
     return page;
+}
+
+static void uhci_free_phys_page(u64 phys)
+{
+    if (!phys) return;
+    vmm_unmap(phys + 0xFFFF800000000000ULL);
+    pmm_free(phys);
 }
 
 static void uhci_wait_td(struct uhci_controller* ctrl, struct uhci_td* td, int timeout_ms)
@@ -150,25 +174,38 @@ static int uhci_control_transfer(struct uhci_controller* ctrl,
     td_phys[1] = uhci_alloc_phys_page();
     td_phys[2] = uhci_alloc_phys_page();
     if (!td_phys[0] || !td_phys[1] || !td_phys[2]) {
-        if (td_phys[0]) pmm_free(td_phys[0]);
-        if (td_phys[1]) pmm_free(td_phys[1]);
-        if (td_phys[2]) pmm_free(td_phys[2]);
+        if (td_phys[0]) uhci_free_phys_page(td_phys[0]);
+        if (td_phys[1]) uhci_free_phys_page(td_phys[1]);
+        if (td_phys[2]) uhci_free_phys_page(td_phys[2]);
         return -1;
     }
 
-    td_virt[0] = (struct uhci_td*)(td_phys[0] + 0xFFFF800000000000ULL);
-    td_virt[1] = (struct uhci_td*)(td_phys[1] + 0xFFFF800000000000ULL);
-    td_virt[2] = (struct uhci_td*)(td_phys[2] + 0xFFFF800000000000ULL);
+    td_virt[0] = (struct uhci_td*)uhci_phys_to_virt(td_phys[0]);
+    td_virt[1] = (struct uhci_td*)uhci_phys_to_virt(td_phys[1]);
+    td_virt[2] = (struct uhci_td*)uhci_phys_to_virt(td_phys[2]);
+    if (!td_virt[0] || !td_virt[1] || !td_virt[2]) {
+        uhci_free_phys_page(td_phys[0]);
+        uhci_free_phys_page(td_phys[1]);
+        uhci_free_phys_page(td_phys[2]);
+        return -1;
+    }
 
     if (data_len > 0 && data) {
         data_buf_phys = uhci_alloc_phys_page();
         if (!data_buf_phys) {
-            pmm_free(td_phys[0]);
-            pmm_free(td_phys[1]);
-            pmm_free(td_phys[2]);
+            uhci_free_phys_page(td_phys[0]);
+            uhci_free_phys_page(td_phys[1]);
+            uhci_free_phys_page(td_phys[2]);
             return -1;
         }
-        data_buf_virt = (void*)(data_buf_phys + 0xFFFF800000000000ULL);
+        data_buf_virt = uhci_phys_to_virt(data_buf_phys);
+        if (!data_buf_virt) {
+            uhci_free_phys_page(data_buf_phys);
+            uhci_free_phys_page(td_phys[0]);
+            uhci_free_phys_page(td_phys[1]);
+            uhci_free_phys_page(td_phys[2]);
+            return -1;
+        }
         if (dir == USB_DIR_OUT)
             Harlin_Copy(data_buf_virt, data, data_len);
         else
@@ -223,13 +260,13 @@ static int uhci_control_transfer(struct uhci_controller* ctrl,
 
     qh_phys = uhci_alloc_phys_page();
     if (!qh_phys) {
-        pmm_free(td_phys[0]);
-        pmm_free(td_phys[1]);
-        pmm_free(td_phys[2]);
-        if (data_buf_phys) pmm_free(data_buf_phys);
+        uhci_free_phys_page(td_phys[0]);
+        uhci_free_phys_page(td_phys[1]);
+        uhci_free_phys_page(td_phys[2]);
+        if (data_buf_phys) uhci_free_phys_page(data_buf_phys);
         return -1;
     }
-    qh_virt = (struct uhci_qh*)(qh_phys + 0xFFFF800000000000ULL);
+    qh_virt = (struct uhci_qh*)uhci_phys_to_virt(qh_phys);
     Harlin_Fill(qh_virt, 0, sizeof(struct uhci_qh));
     qh_virt->link = UHCI_QH_LINK(0, 1);
     qh_virt->element = (u32)td_phys[0];
@@ -254,11 +291,12 @@ static int uhci_control_transfer(struct uhci_controller* ctrl,
     }
 
     pmm_free(qh_phys);
-    pmm_free(td_phys[0]);
-    pmm_free(td_phys[1]);
-    pmm_free(td_phys[2]);
+    vmm_unmap(qh_phys + 0xFFFF800000000000ULL);
+    uhci_free_phys_page(td_phys[0]);
+    uhci_free_phys_page(td_phys[1]);
+    uhci_free_phys_page(td_phys[2]);
     if (data_buf_phys)
-        pmm_free(data_buf_phys);
+        uhci_free_phys_page(data_buf_phys);
 
     if (status & (UHCI_TD_STALLED | UHCI_TD_CRC))
         return -1;
@@ -405,7 +443,7 @@ static int uhci_init_controller(struct pci_device* pcidev)
     fl_phys = uhci_alloc_phys_page();
     if (!fl_phys)
         return -1;
-    ctrl->frame_list = (struct uhci_frentry*)(fl_phys + 0xFFFF800000000000ULL);
+    ctrl->frame_list = (struct uhci_frentry*)uhci_phys_to_virt(fl_phys);
     ctrl->frame_list_phys = fl_phys;
 
     for (i = 0; i < UHCI_FRAME_LIST_SIZE; i++)

@@ -7,29 +7,38 @@ start:
     mov es, ax
     mov ss, ax
     mov sp, 0x7C00
-    push dx
 
     mov ah, 0x00
     mov al, 0x03
     int 0x10
 
-    pop dx
-    push dx
-    xor ax, ax
+    mov ah, 0x00
+    mov dl, 0x00
     int 0x13
     jc disk_error
 
-    pop dx
-    mov ah, 0x02
-    mov al, 120
-    mov ch, 0
-    mov cl, 2
-    mov dh, 0
     mov bx, 0x1000
     mov es, bx
     xor bx, bx
+    xor ch, ch
+    xor dh, dh
+    mov cl, 1
+read_track:
+    push cx
+read_loop:
+    mov ah, 0x02
+    mov al, 1
+    mov dl, 0x00
     int 0x13
     jc disk_error
+    add bx, 512
+    inc cl
+    cmp cl, 19
+    jb read_loop
+    pop cx
+    inc ch
+    cmp ch, 80
+    jb read_track
 
     call delay_1s
     call enable_a20
@@ -110,6 +119,8 @@ long_mode:
     mov gs, ax
     mov ss, ax
     mov rsp, 0x90000
+    xchg bx, bx
+    xchg ebx, ebx
     mov rax, 0x10000
     call rax
     jmp $
@@ -133,7 +144,12 @@ setup_vesa:
     ret
 
 disk_error:
-    jmp $
+    mov al, ah
+    add al, '0'
+    mov dx, 0x0402
+    out dx, al
+    hlt
+    jmp disk_error
 
 %include "src/asm/delay.asm"
 %include "src/asm/a20.asm"

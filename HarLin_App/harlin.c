@@ -2,6 +2,9 @@
 
 void _start(void)
 {
-    harlin_print("HarLin Kernel is OK\r\n");
-    harlin_exit(0);
+    if (harlin_exec("shell.chc") != 0)
+        harlin_exit(1);
+    for (;;) {
+        harlin_yield();
+    }
 }

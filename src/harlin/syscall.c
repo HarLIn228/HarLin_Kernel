@@ -117,6 +117,25 @@ static unsigned long sys_getc(struct syscall_regs* r)
     }
 }
 
+static unsigned long sys_keypoll(struct syscall_regs* r)
+{
+    unsigned char sc;
+    char ch;
+    (void)r;
+    interrupts_disable();
+    if (keyboard_has_data()) {
+        sc = keyboard_poll();
+        interrupts_enable();
+        if (sc) {
+            ch = keyboard_scancode_to_ascii(sc);
+            if (ch) return (unsigned long)(unsigned char)ch;
+        }
+        return 0;
+    }
+    interrupts_enable();
+    return 0;
+}
+
 static unsigned long sys_alloc(struct syscall_regs* r)
 {
     u64 phys;
@@ -309,6 +328,7 @@ static unsigned long sys_exec(struct syscall_regs* r)
 
 static unsigned long sys_yield(struct syscall_regs* r)
 {
+    (void)r;
     schedule();
     return 0;
 }
@@ -323,6 +343,7 @@ static unsigned long sys_pipe_create(struct syscall_regs* r)
     int id = pipe_create();
     if (id < 0)
         return (unsigned long)id;
+    process_register_handle(1, id);
     if (r->rdi) {
         struct Harlin_Pipe pipe;
         if (!user_ptr_valid(r->rdi, sizeof(struct Harlin_Pipe)))
@@ -403,6 +424,7 @@ static unsigned long sys_pipe_write(struct syscall_regs* r)
 static unsigned long sys_pipe_close(struct syscall_regs* r)
 {
     int id = (int)r->rdi;
+    process_unregister_handle(id);
     pipe_close(id);
     return 0;
 }
@@ -733,10 +755,68 @@ static unsigned long sys_dlclose(struct syscall_regs* r)
     return (unsigned long)Harlin_DlClose((int)r->rdi);
 }
 
+#include "display.h"
+
+static unsigned long sys_set_mode(struct syscall_regs* r)
+{
+    return (unsigned long)Harlin_SetMode((int)r->rdi);
+}
+
+static unsigned long sys_clear(struct syscall_regs* r)
+{
+    Harlin_ClearScreen((unsigned char)r->rdi);
+    return 0;
+}
+
+static unsigned long sys_draw_rect(struct syscall_regs* r)
+{
+    Harlin_DrawRect((int)r->rdi, (int)r->rsi, (int)r->rdx, (int)r->r8, (unsigned int)r->r9);
+    return 0;
+}
+
+static unsigned long sys_draw_char(struct syscall_regs* r)
+{
+    Harlin_DrawChar((int)r->rdi, (int)r->rsi, (char)r->rdx, (unsigned int)r->r8, (unsigned int)r->r9);
+    return 0;
+}
+
+static unsigned long sys_draw_string(struct syscall_regs* r)
+{
+    char kbuf[256];
+    u64 ustr = r->rdx;
+    u64 i;
+    if (!ustr)
+        return (unsigned long)-1;
+    if (!user_ptr_valid(ustr, 1))
+        return (unsigned long)-1;
+    {
+        u64 max = sizeof(kbuf) - 1;
+        for (i = 0; i < max; i++) {
+            char c;
+            if (ustr + i < USER_ADDR_START || ustr + i >= USER_ADDR_END)
+                return (unsigned long)-1;
+            if (copy_from_user(&c, ustr + i, 1) != 0)
+                return (unsigned long)-1;
+            kbuf[i] = c;
+            if (c == 0) break;
+        }
+        kbuf[i] = 0;
+    }
+    Harlin_DrawString((int)r->rdi, (int)r->rsi, kbuf, (unsigned int)r->r8, (unsigned int)r->r9);
+    return 0;
+}
+
+static unsigned long sys_get_fb(struct syscall_regs* r)
+{
+    (void)r;
+    return (unsigned long)0xA0000ULL;
+}
+
 static syscall_t syscall_table[] = {
     [HARLIN_SYS_EXIT]  = sys_exit,
     [HARLIN_SYS_PRINT] = sys_print,
     [HARLIN_SYS_GETC]  = sys_getc,
+    [HARLIN_SYS_KEYPOLL] = sys_keypoll,
     [HARLIN_SYS_ALLOC] = sys_alloc,
     [HARLIN_SYS_FREE]  = sys_free,
     [HARLIN_SYS_OPEN]  = sys_open,
@@ -777,6 +857,12 @@ static syscall_t syscall_table[] = {
     [HARLIN_SYS_DLOPEN]     = sys_dlopen,
     [HARLIN_SYS_DLSYM]      = sys_dlsym,
     [HARLIN_SYS_DLCLOSE]    = sys_dlclose,
+    [HARLIN_SYS_SETMODE]    = sys_set_mode,
+    [HARLIN_SYS_CLEAR]      = sys_clear,
+    [HARLIN_SYS_DRAWRECT]   = sys_draw_rect,
+    [HARLIN_SYS_DRAWCHAR]   = sys_draw_char,
+    [HARLIN_SYS_DRAWSTRING] = sys_draw_string,
+    [HARLIN_SYS_GETFB]      = sys_get_fb,
 };
 
 #define SYSCALL_COUNT (sizeof(syscall_table) / sizeof(syscall_table[0]))

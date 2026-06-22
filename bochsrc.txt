@@ -1,0 +1,57 @@
+# HarLin OS Bochs Configuration
+# Bochs 安装路径: D:\Bochs-3.0
+# BIOS 文件: D:\Bochs-3.0\BIOS-bochs-latest
+
+# 内存
+megs: 32
+
+# CPU
+cpu: model=core2_penryn_t9600, count=1, reset_on_triple_fault=1, ignore_bad_msrs=1
+
+# BIOS 和 VGA BIOS
+romimage: file="D:\Bochs-3.0\BIOS-bochs-latest", address=0xfffe0000
+vgaromimage: file="D:\Bochs-3.0\VGABIOS-lgpl-latest.bin"
+
+# VGA
+vga: extension=vbe, update_freq=60
+
+# 时钟
+clock: sync=realtime, time0=local
+
+# 串口输出到文件
+com1: enabled=1, mode=file, dev="D:\Code\Code\Kernel\build\serial.log"
+
+# 启动
+boot: floppy
+floppya: 1_44="D:\Code\Code\Kernel\build\HarLin.img", status=inserted
+
+# 软盘启动签名检查禁用 (避免 SIG 检查失败)
+floppy_bootsig_check: disabled=1
+
+# 键盘
+keyboard: type=mf, keymap=D:\Bochs-3.0\keymaps\sdl2-pc-us.map
+
+# 鼠标禁用
+mouse: enabled=0
+
+# PCI
+pci: enabled=1, chipset=i440fx
+
+# 杂项
+unmapped: enabled=0
+private_colormap: enabled=0
+
+# 日志
+log: D:\Code\Code\Kernel\build\bochs.log
+panic: action=report
+error: action=report
+info: action=report
+debug: action=ignore
+
+# 调试支持
+debugger_log: D:\Code\Code\Kernel\build\debugger.log
+magic_break: enabled=1
+# gdbstub: enabled=1, port=1234, text_base=0, data_base=0, bss_base=0
+
+# 显示
+display_library: nogui

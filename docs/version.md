@@ -1,7 +1,19 @@
 # HarLin Kernel 版本历史
 
 本项目采用 CalVer 版本号，格式为 `YY.D.X`：
-## H26.4（最新）
+## H26.4.1（最新）
+
+- 内核格式从 PE 改为 ELF 标准
+- 集成 LLVM 工具链 (clang + ld.lld)
+- 移除 CHC 自定义格式及 HCC 编译器
+- 链接脚本调整为 ELF PHDRS 结构
+- 新增 Bochs 调试支持 (bochsrc.txt, run-bochs.bat)
+- 软盘镜像填充到完整 1.44MB
+- 修复 boot.asm 栈错误与磁盘读取逻辑
+- 新增 VGA 13h Shell GLI (shell.c)
+- 保留 HarLinAPI 系统调用接口
+
+## H26.4
 
 - ACPI 电源管理：RSDP 扫描、FADT 解析、`acpi_power_off()` 硬件关机、`acpi_reboot()` 系统重启
 - 网络协议栈增强：TCP 多连接支持（连接表管理，`tcp_connect_remote`/`tcp_send`/`tcp_recv`/`tcp_close_conn`）

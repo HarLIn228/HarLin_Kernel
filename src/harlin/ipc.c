@@ -139,7 +139,18 @@ int Harlin_MsgRecv(int qid, u32* type, void* buf, u32 len, u32 expected_type)
                         dst[i] = q->msgs[msg_idx].data[i];
                 }
                 q->msgs[msg_idx].valid = 0;
-                q->head = (msg_idx + 1) % IPC_MAX_MSG_PER_QUEUE;
+                {
+                    int k;
+                    for (k = 0; k < q->count - 1; k++) {
+                        int src = (q->head + k + 1) % IPC_MAX_MSG_PER_QUEUE;
+                        int dst2 = (q->head + k) % IPC_MAX_MSG_PER_QUEUE;
+                        q->msgs[dst2] = q->msgs[src];
+                    }
+                    {
+                        int last = (q->head + q->count - 1) % IPC_MAX_MSG_PER_QUEUE;
+                        Harlin_Fill(&q->msgs[last], 0, sizeof(struct ipc_message));
+                    }
+                }
                 q->count--;
 
                 if (q->num_blocked_senders > 0) {

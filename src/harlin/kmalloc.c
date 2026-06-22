@@ -5,18 +5,7 @@
 
 #define KMALLOC_MIN_SIZE 16
 #define KMALLOC_MAX_SIZE 0x100000
-#define KMALLOC_BLOCK_MAGIC 0x48414E44
 #define KERNEL_HEAP_START 0xFFFF800000000000
-
-struct kmalloc_block {
-    u32 magic;
-    u32 size;
-    u32 used;
-    u32 pages;
-    u64 base_virt;
-    struct kmalloc_block* next;
-    struct kmalloc_block* prev;
-};
 
 static struct kmalloc_block* kmalloc_head = 0;
 static struct spinlock kmalloc_lock;

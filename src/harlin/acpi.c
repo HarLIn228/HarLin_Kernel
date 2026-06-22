@@ -1,6 +1,8 @@
 #include "acpi.h"
 #include "io.h"
 #include "screen.h"
+#include "vmm.h"
+#include "pmm.h"
 
 #define SLP_EN    (1U << 13)
 
@@ -150,9 +152,14 @@ static int acpi_parse_s5(u8* dsdt_base, u32 dsdt_len)
 
 int acpi_init(void)
 {
+    static int acpi_initialized = 0;
     struct rsdp_descriptor* rsdp;
     struct sdt_header* rsdt_hdr;
     struct sdt_header* fadt_hdr;
+
+    if (acpi_initialized)
+        return 0;
+    acpi_initialized = 1;
 
     rsdp = (struct rsdp_descriptor*)acpi_scan_rsdp();
     if (!rsdp) {
@@ -194,19 +201,65 @@ int acpi_init(void)
         g_reset_addr = *(u64*)(reset_reg + 4);
 
         if (dsdt_addr) {
-            struct sdt_header* dsdt_hdr = (struct sdt_header*)(u64)dsdt_addr;
-            if (acpi_checksum(dsdt_hdr, dsdt_hdr->length) == 0) {
-                if (acpi_parse_s5((u8*)dsdt_hdr, dsdt_hdr->length)) {
-                    screen_puts("[acpi] s5 package parsed\n");
+            u32 dsdt_len_field = 0;
+            int dsdt_mapped = 0;
+            {
+                u8* tmp = (u8*)(u64)dsdt_addr;
+                if (vmm_mapped((u64)tmp)) {
+                    dsdt_len_field = *(u32*)(tmp + 4);
+                }
+            }
+            if (dsdt_len_field == 0) {
+                u32 pages = 1;
+                u64 phys = dsdt_addr & ~0xFFFULL;
+                u64 virt_base = ACPI_TABLE_VIRT;
+                if (vmm_map(virt_base, phys, VMM_PRESENT | VMM_WRITABLE) == 0) {
+                    dsdt_mapped = 1;
+                    {
+                        u8* tmp = (u8*)(virt_base + (dsdt_addr & 0xFFF));
+                        dsdt_len_field = *(u32*)(tmp + 4);
+                    }
+                    if (dsdt_len_field > 4096) {
+                        u32 extra = (dsdt_len_field + 0xFFF) / 4096;
+                        u32 i;
+                        int map_ok = 1;
+                        for (i = 1; i < extra; i++) {
+                            if (virt_base + i * 4096 < ACPI_TABLE_END) {
+                                if (vmm_map(virt_base + i * 4096, phys + i * 4096, VMM_PRESENT | VMM_WRITABLE) != 0) {
+                                    map_ok = 0;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!map_ok) {
+                            screen_puts("[acpi] dsdt map partial fail, using defaults\n");
+                            g_slp_typa = 0x00;
+                            g_slp_typb = 0x00;
+                            dsdt_len_field = 0;
+                        }
+                        (void)pages;
+                    }
                 } else {
-                    screen_puts("[acpi] s5 not found, using defaults\n");
+                    screen_puts("[acpi] dsdt map failed, using defaults\n");
                     g_slp_typa = 0x00;
                     g_slp_typb = 0x00;
                 }
-            } else {
-                screen_puts("[acpi] dsdt checksum error, using defaults\n");
-                g_slp_typa = 0x00;
-                g_slp_typb = 0x00;
+            }
+            if (dsdt_len_field > 0 && dsdt_mapped) {
+                u8* dsdt_base = (u8*)(ACPI_TABLE_VIRT + (dsdt_addr & 0xFFF));
+                if (acpi_checksum(dsdt_base, dsdt_len_field) == 0) {
+                    if (acpi_parse_s5(dsdt_base, dsdt_len_field)) {
+                        screen_puts("[acpi] s5 package parsed\n");
+                    } else {
+                        screen_puts("[acpi] s5 not found, using defaults\n");
+                        g_slp_typa = 0x00;
+                        g_slp_typb = 0x00;
+                    }
+                } else {
+                    screen_puts("[acpi] dsdt checksum error, using defaults\n");
+                    g_slp_typa = 0x00;
+                    g_slp_typb = 0x00;
+                }
             }
         } else {
             screen_puts("[acpi] no dsdt, using defaults\n");

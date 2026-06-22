@@ -119,9 +119,7 @@ void smp_ap_entry(u32 cpu_id)
     spinlock_acquire(&smp_lock);
     ap_started_count++;
     spinlock_release(&smp_lock);
-    for (;;) {
-        asm volatile ("hlt");
-    }
+    scheduler_secondary_loop();
 }
 
 static void smp_start_cpu(u32 apic_id, int cpu_id)

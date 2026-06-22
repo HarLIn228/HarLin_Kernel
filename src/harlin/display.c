@@ -460,6 +460,22 @@ int display_get_height(void)
 void display_draw_rect(int x, int y, int w, int h, u32 color)
 {
     int i, j;
+    if (current_mode == HARLIN_DISP_VGA_13H) {
+        unsigned char* vga = (unsigned char*)0xA0000;
+        unsigned char c8 = (unsigned char)(color & 0xFF);
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x >= 320 || y >= 200) return;
+        if (x + w > 320) w = 320 - x;
+        if (y + h > 200) h = 200 - y;
+        if (w <= 0 || h <= 0) return;
+        for (i = y; i < y + h; i++) {
+            for (j = x; j < x + w; j++) {
+                vga[i * 320 + j] = c8;
+            }
+        }
+        return;
+    }
     if (current_mode != HARLIN_DISP_VESA)
         return;
     if (x < 0) { w += x; x = 0; }
@@ -498,6 +514,23 @@ void display_draw_char(int x, int y, char c, u32 fg, u32 bg)
 {
     int row, col;
     unsigned char ch = (unsigned char)c;
+    if (current_mode == HARLIN_DISP_VGA_13H) {
+        unsigned char* vga = (unsigned char*)0xA0000;
+        unsigned char fg8 = (unsigned char)(fg & 0xFF);
+        unsigned char bg8 = (unsigned char)(bg & 0xFF);
+        if (ch >= 128) return;
+        if (x < 0 || y < 0 || x + 8 > 320 || y + 16 > 200) return;
+        for (row = 0; row < 16; row++) {
+            unsigned char bits = font_8x16[ch][row];
+            for (col = 0; col < 8; col++) {
+                if (bits & (0x80 >> col))
+                    vga[(y + row) * 320 + (x + col)] = fg8;
+                else
+                    vga[(y + row) * 320 + (x + col)] = bg8;
+            }
+        }
+        return;
+    }
     if (current_mode != HARLIN_DISP_VESA)
         return;
     if (ch >= 128)

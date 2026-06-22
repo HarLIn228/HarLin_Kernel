@@ -77,6 +77,13 @@ typedef signed long long   s64;
 #define HARLIN_SYS_DLOPEN       40
 #define HARLIN_SYS_DLSYM        41
 #define HARLIN_SYS_DLCLOSE      42
+#define HARLIN_SYS_SETMODE      43
+#define HARLIN_SYS_CLEAR        44
+#define HARLIN_SYS_DRAWRECT     45
+#define HARLIN_SYS_DRAWCHAR     46
+#define HARLIN_SYS_DRAWSTRING   47
+#define HARLIN_SYS_GETFB        48
+#define HARLIN_SYS_KEYPOLL      49
 
 #define HARLIN_KEY_SHIFT  0x01
 #define HARLIN_KEY_CTRL   0x02
@@ -91,6 +98,7 @@ typedef signed long long   s64;
 
 void Harlin_Boot(void);
 void Harlin_Shutdown(void);
+void Harlin_Shell(void);
 
 void Harlin_Clear(void);
 void Harlin_PutChar(char c);
@@ -103,6 +111,9 @@ int  Harlin_SetMode(int mode);
 void Harlin_ClearScreen(unsigned char color);
 void Harlin_PutPixel(int x, int y, unsigned char color);
 void Harlin_PutString(int x, int y, const char* str, unsigned char color);
+void Harlin_DrawRect(int x, int y, int w, int h, unsigned int color);
+void Harlin_DrawChar(int x, int y, char c, unsigned int fg, unsigned int bg);
+void Harlin_DrawString(int x, int y, const char* str, unsigned int fg, unsigned int bg);
 
 u8   Harlin_PortIn8(u16 port);
 u16  Harlin_PortIn16(u16 port);
@@ -201,6 +212,9 @@ struct Harlin_File {
     u32 size;
     u32 dir_cluster;
     u32 dir_offset;
+    int damaged;
+    int is_ramfs;
+    const u8* ramfs_data;
 };
 
 struct Harlin_Pipe {

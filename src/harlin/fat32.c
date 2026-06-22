@@ -1,5 +1,6 @@
 #include "fat32.h"
 #include "ata.h"
+#include "initramfs.h"
 
 #define FAT32_EOC      0x0FFFFFF8
 #define FAT32_BAD      0x0FFFFFF7
@@ -435,6 +436,9 @@ int Harlin_Open(const char* name, struct Harlin_File* out)
     if (!out || !name)
         return HARLIN_FS_ERROR;
 
+    if (Harlin_Initramfs_Open(name, out) == 0)
+        return HARLIN_FS_OK;
+
     if (resolve_path(name, &dir_cluster, &fname) != 0)
         return HARLIN_FS_ERROR;
 
@@ -447,6 +451,8 @@ int Harlin_Open(const char* name, struct Harlin_File* out)
     if (attr & 0x10)
         return HARLIN_FS_ERROR;
 
+    out->is_ramfs = 0;
+    out->ramfs_data = 0;
     out->start_cluster = file_cluster;
     out->current_cluster = file_cluster;
     out->position = 0;
@@ -460,10 +466,22 @@ int Harlin_Read(struct Harlin_File* file, void* buf, u32 len)
 {
     u8* dst = (u8*)buf;
     u32 remaining = len;
-    u32 cluster_size = bytes_per_sector * sectors_per_cluster;
+    u32 cluster_size;
 
     if (!file || !buf)
         return HARLIN_FS_ERROR;
+
+    if (file->is_ramfs) {
+        if (file->position >= file->size)
+            return HARLIN_FS_EOF;
+        if (file->position + remaining > file->size)
+            remaining = file->size - file->position;
+        Harlin_Copy(dst, file->ramfs_data + file->position, remaining);
+        file->position += remaining;
+        return (int)remaining;
+    }
+
+    cluster_size = bytes_per_sector * sectors_per_cluster;
 
     if (file->position >= file->size)
         return HARLIN_FS_EOF;
@@ -573,18 +591,55 @@ static int update_directory_size(struct Harlin_File* file)
     return 0;
 }
 
+static int truncate_file_at(struct Harlin_File* file, u32 target_clusters)
+{
+    u32 cluster = file->start_cluster;
+    u32 i = 0;
+    u32 prev = 0;
+    int rc = 0;
+    if (!cluster || cluster >= FAT32_EOC)
+        return 0;
+    while (cluster < FAT32_EOC && i < target_clusters) {
+        prev = cluster;
+        cluster = next_cluster(cluster);
+        i++;
+    }
+    while (cluster < FAT32_EOC) {
+        u32 next = next_cluster(cluster);
+        if (link_cluster(cluster, 0) != 0)
+            rc = -1;
+        prev = 0;
+        cluster = next;
+    }
+    if (prev) {
+        if (link_cluster(prev, FAT32_EOC) != 0)
+            rc = -1;
+    }
+    return rc;
+}
+
 int Harlin_Write(struct Harlin_File* file, const void* buf, u32 len)
 {
     const u8* src = (const u8*)buf;
     u32 remaining = len;
     u32 cluster_size = bytes_per_sector * sectors_per_cluster;
     u32 total_clusters_needed;
+    u32 orig_start_cluster;
+    u32 orig_size;
+    u32 orig_current_cluster;
+    u64 orig_position;
+    int write_failed = 0;
 
     if (!file || !buf)
         return HARLIN_FS_ERROR;
 
     if (len == 0)
         return 0;
+
+    orig_start_cluster = file->start_cluster;
+    orig_size = file->size;
+    orig_current_cluster = file->current_cluster;
+    orig_position = (u32)file->position;
 
     total_clusters_needed = (file->position + len + cluster_size - 1) / cluster_size;
 
@@ -602,8 +657,10 @@ int Harlin_Write(struct Harlin_File* file, const void* buf, u32 len)
             chunk = remaining;
 
         if (chunk < cluster_size) {
-            if (read_cluster(file->current_cluster, cluster_buf) != 0)
-                return HARLIN_FS_ERROR;
+            if (read_cluster(file->current_cluster, cluster_buf) != 0) {
+                write_failed = 1;
+                goto done;
+            }
         } else {
             int i;
             for (i = 0; i < (int)cluster_size; i++)
@@ -612,8 +669,10 @@ int Harlin_Write(struct Harlin_File* file, const void* buf, u32 len)
 
         Harlin_Copy(&cluster_buf[cluster_pos], src, chunk);
 
-        if (write_cluster(file->current_cluster, cluster_buf) != 0)
-            return HARLIN_FS_ERROR;
+        if (write_cluster(file->current_cluster, cluster_buf) != 0) {
+            write_failed = 1;
+            goto done;
+        }
 
         src += chunk;
         file->position += chunk;
@@ -624,10 +683,43 @@ int Harlin_Write(struct Harlin_File* file, const void* buf, u32 len)
         }
     }
 
+done:
+    if (write_failed) {
+        int trunc_rc = -1;
+        if (orig_start_cluster == 0) {
+            trunc_rc = truncate_file_at(file, 0);
+            file->start_cluster = 0;
+            file->current_cluster = 0;
+        } else {
+            trunc_rc = truncate_file_at(file, (orig_size + cluster_size - 1) / cluster_size);
+        }
+        file->size = orig_size;
+        file->position = orig_position;
+        file->current_cluster = orig_current_cluster;
+        if (trunc_rc != 0)
+            file->damaged = 1;
+        return HARLIN_FS_ERROR;
+    }
+
     if (file->position > file->size)
         file->size = file->position;
 
-    update_directory_size(file);
+    if (update_directory_size(file) != 0) {
+        int trunc_rc = -1;
+        if (orig_start_cluster == 0) {
+            trunc_rc = truncate_file_at(file, 0);
+            file->start_cluster = 0;
+            file->current_cluster = 0;
+        } else {
+            trunc_rc = truncate_file_at(file, (orig_size + cluster_size - 1) / cluster_size);
+        }
+        file->size = orig_size;
+        file->position = orig_position;
+        file->current_cluster = orig_current_cluster;
+        if (trunc_rc != 0)
+            file->damaged = 1;
+        return HARLIN_FS_ERROR;
+    }
 
     return (int)(len - remaining);
 }

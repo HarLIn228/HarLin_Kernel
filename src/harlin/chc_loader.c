@@ -430,7 +430,9 @@ int chc_load(const void* file_data, u64 file_size)
     u64 data_base;
     u64 bss_base;
     u64 stack_bottom;
+    u64 stack_size_actual;
     u64 code_pages;
+    u64 kernel_pml4_saved;
     u64 i;
     int r;
     int pid;
@@ -450,8 +452,13 @@ int chc_load(const void* file_data, u64 file_size)
     if (!proc)
         return -1;
 
-    if (map_user_pages(code_base, hdr->code_size, VMM_PRESENT | VMM_USER | VMM_WRITABLE, proc) != 0)
+    kernel_pml4_saved = vmm_current_pml4();
+    vmm_switch(proc->pml4_phys);
+
+    if (map_user_pages(code_base, hdr->code_size, VMM_PRESENT | VMM_USER | VMM_WRITABLE, proc) != 0) {
+        vmm_switch(kernel_pml4_saved);
         return -1;
+    }
     if (hdr->data_size > 0) {
         if (map_user_pages(data_base, hdr->data_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER, proc) != 0)
             goto fail_code;
@@ -465,7 +472,8 @@ int chc_load(const void* file_data, u64 file_size)
             goto fail_data;
     }
     if (hdr->stack_size > 0) {
-        stack_bottom = USER_STACK_TOP - ((hdr->stack_size + 4095) & ~4095);
+        stack_size_actual = (hdr->stack_size + 4095) & ~4095;
+        stack_bottom = USER_STACK_TOP - stack_size_actual;
         if (stack_bottom >= USER_STACK_TOP) {
             r = -1;
             goto fail_bss;
@@ -473,6 +481,7 @@ int chc_load(const void* file_data, u64 file_size)
         if (map_user_pages(stack_bottom, hdr->stack_size, VMM_PRESENT | VMM_WRITABLE | VMM_USER, proc) != 0)
             goto fail_bss;
     } else {
+        stack_size_actual = 4096;
         stack_bottom = USER_STACK_TOP - 4096;
         if (map_user_pages(stack_bottom, 4096, VMM_PRESENT | VMM_WRITABLE | VMM_USER, proc) != 0)
             goto fail_bss;
@@ -508,10 +517,11 @@ int chc_load(const void* file_data, u64 file_size)
         }
     }
 
+    vmm_switch(kernel_pml4_saved);
     return pid;
 
 fail_all:
-    unmap_user_pages(stack_bottom, hdr->stack_size ? hdr->stack_size : 4096, proc);
+    unmap_user_pages(stack_bottom, stack_size_actual, proc);
 fail_bss:
     if (hdr->bss_size > 0)
         unmap_user_pages(bss_base, hdr->bss_size, proc);
@@ -520,5 +530,6 @@ fail_data:
         unmap_user_pages(data_base, hdr->data_size, proc);
 fail_code:
     unmap_user_pages(code_base, hdr->code_size, proc);
+    vmm_switch(kernel_pml4_saved);
     return -1;
 }

@@ -10,7 +10,6 @@
 #include "partition.h"
 #include "io.h"
 #include "gdt.h"
-#include "chc_loader.h"
 #include "scheduler.h"
 #include "pipe.h"
 #include "ipc.h"
@@ -18,7 +17,6 @@
 #include "spinlock.h"
 #include "kmalloc.h"
 #include "rtc.h"
-#include "harlin_chc.h"
 #include "pci.h"
 #include "audio.h"
 #include "usb.h"
@@ -251,6 +249,21 @@ void Harlin_PutString(int x, int y, const char* str, unsigned char color)
     display_put_string(x, y, str, color);
 }
 
+void Harlin_DrawRect(int x, int y, int w, int h, unsigned int color)
+{
+    display_draw_rect(x, y, w, h, color);
+}
+
+void Harlin_DrawChar(int x, int y, char c, unsigned int fg, unsigned int bg)
+{
+    display_draw_char(x, y, c, fg, bg);
+}
+
+void Harlin_DrawString(int x, int y, const char* str, unsigned int fg, unsigned int bg)
+{
+    display_draw_string(x, y, str, fg, bg);
+}
+
 int Harlin_CreatePipe(struct Harlin_Pipe* pipe)
 {
     int id;
@@ -372,12 +385,35 @@ void Harlin_Boot(void)
     extern char __bss_start[];
     extern char __bss_end[];
 
+    {
+        asm volatile ("outb %0, %1" : : "a"((unsigned char)'B'), "Nd"((unsigned short)0x0402));
+        const char* s = "[BOOT] start\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
+
     Harlin_Fill(__bss_start, 0, (u32)(__bss_end - __bss_start));
 
+    {
+        const char* s = "[BOOT] bss filled\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
+
     gdt_init();
+    {
+        const char* s = "[BOOT] gdt done\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
     tss_set_rsp0(0x90000);
     idt_init();
+    {
+        const char* s = "[BOOT] idt done\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
     pic_init();
+    {
+        const char* s = "[BOOT] pic done\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
     {
         unsigned char reg_b;
         outb(0x70, 0x0B);
@@ -397,8 +433,16 @@ void Harlin_Boot(void)
     }
     outb(0x21, inb(0x21) | 0x04);
     Harlin_InitPmm();
+    {
+        const char* s = "[BOOT] pmm done\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
     Harlin_InitKmalloc();
     Harlin_InitVmm(0x20000);
+    {
+        const char* s = "[BOOT] vmm done\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
     keyboard_init();
     scheduler_init();
     timer_init();
@@ -409,6 +453,10 @@ void Harlin_Boot(void)
     __asm__ volatile ("invlpg (%0)" : : "r"(0xFEE00000ULL) : "memory");
     Harlin_InitSmp();
     interrupts_enable();
+    {
+        const char* s = "[BOOT] interrupts enabled\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
 
     if (pci_init() < 0) {
         screen_puts("[pci] bus not present\n");
@@ -442,8 +490,14 @@ void Harlin_Boot(void)
         screen_puts("[acpi] no device\n");
     }
 
-    chc_load(harlin_chc_data, harlin_chc_data_size);
-    schedule();
+    screen_puts("HarLin OS ELF ready.\n");
+    {
+        const char* s = "[BOOT] entering shell loop\n";
+        while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
+    }
+
+    Harlin_Shell();
+
     for (;;) {
         asm volatile("hlt");
     }

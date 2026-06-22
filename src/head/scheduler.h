@@ -9,6 +9,8 @@
 #define PROC_STATE_SLEEPING 3
 #define PROC_STATE_BLOCKED  4
 
+#define PROC_MAX_HANDLES 16
+
 struct process {
     u64 rax, rcx, rdx, rbx, rbp, rsi, rdi;
     u64 r8, r9, r10, r11, r12, r13, r14, r15;
@@ -26,6 +28,14 @@ struct process {
     u64 user_vaddrs[16];
     int page_count;
     u64 next_alloc_virt;
+    u64 pml4_phys;
+    u64 kernel_stack_top;
+    u64 kernel_stack_base;
+    u64 kernel_stack_pages_phys[4];
+    int kernel_stack_pages_count;
+    int handles[PROC_MAX_HANDLES];
+    int handle_kinds[PROC_MAX_HANDLES];
+    int handle_count;
 };
 
 void scheduler_init(void);
@@ -43,5 +53,12 @@ void scheduler_sleep(u32 ms);
 void process_block_current(void);
 void process_wake(int pid);
 int scheduler_get_load(int cpu);
+void save_context(struct process* p);
+int process_register_handle(int kind, int id);
+void process_unregister_handle(int id);
+void scheduler_secondary_loop(void) __attribute__((noreturn));
+int scheduler_try_run_user(void);
+void scheduler_dispatch_from_timer(unsigned long* frame);
+void process_set_kernel_stack(int pid, u64 stack_top);
 
 #endif

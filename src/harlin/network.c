@@ -666,9 +666,27 @@ static void tcp_build_and_send(struct tcp_conn* conn,
     }
 }
 
+static int tcp_verify_checksum(unsigned char* src_ip, unsigned char* dst_ip, unsigned char* tcp_seg, int tcp_len)
+{
+    unsigned short received = ((unsigned short)tcp_seg[16] << 8) | tcp_seg[17];
+    unsigned short computed;
+    unsigned char saved[2];
+    saved[0] = tcp_seg[16];
+    saved[1] = tcp_seg[17];
+    tcp_seg[16] = 0;
+    tcp_seg[17] = 0;
+    computed = tcp_compute_checksum(src_ip, dst_ip, tcp_seg, tcp_len);
+    tcp_seg[16] = saved[0];
+    tcp_seg[17] = saved[1];
+    if (computed == 0) computed = 0xFFFF;
+    return received == computed;
+}
+
 static int tcp_connect_conn(struct tcp_conn* conn)
 {
     int timeout;
+    int syn_retries = 0;
+    int rto_cycles = 1000000;
 
     if (!conn->mac_resolved) {
         if (!arp_resolve(conn->remote_ip)) return 0;
@@ -683,43 +701,137 @@ static int tcp_connect_conn(struct tcp_conn* conn)
     conn->seq_remote = 0;
     conn->state = TCP_STATE_SYN_SENT;
 
-    tcp_build_and_send(conn, TCP_FLAG_SYN, (unsigned char*)0, 0);
+    while (syn_retries < 5) {
+        tcp_build_and_send(conn, TCP_FLAG_SYN, (unsigned char*)0, 0);
+        syn_retries++;
 
-    timeout = 10000000;
-    while (timeout > 0) {
-        unsigned char rx[2048];
-        int len = net_wait_packet(rx, sizeof(rx));
-        if (len > 0) {
-            arp_respond(rx, len);
+        timeout = rto_cycles;
+        while (timeout > 0) {
+            unsigned char rx[2048];
+            int len = net_wait_packet(rx, sizeof(rx));
+            if (len > 0) {
+                arp_respond(rx, len);
 
-            if (len >= 34 && rx[12] == 0x08 && rx[13] == 0x00 && rx[23] == IP_PROTO_TCP) {
-                unsigned short sport, dport;
-                sport = ((unsigned short)rx[34] << 8) | rx[35];
-                dport = ((unsigned short)rx[36] << 8) | rx[37];
+                if (len >= 34 && rx[12] == 0x08 && rx[13] == 0x00 && rx[23] == IP_PROTO_TCP) {
+                    unsigned short sport, dport;
+                    int ip_hdr_len = (rx[14] & 0x0F) * 4;
+                    int tcp_start = 14 + ip_hdr_len;
+                    sport = ((unsigned short)rx[tcp_start] << 8) | rx[tcp_start + 1];
+                    dport = ((unsigned short)rx[tcp_start + 2] << 8) | rx[tcp_start + 3];
 
-                if (sport == conn->dport && dport == conn->sport) {
-                    unsigned char flags = rx[47];
-                    if (conn->state == TCP_STATE_SYN_SENT && (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
-                        conn->seq_remote  = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
-                        conn->seq_remote++;
-                        conn->state = TCP_STATE_ESTABLISHED;
+                    if (sport == conn->dport && dport == conn->sport) {
+                        unsigned char flags;
+                        int tcp_hdr_len = ((rx[tcp_start + 12] >> 4) & 0x0F) * 4;
+                        int tcp_total = len - tcp_start;
+                        if (tcp_total < tcp_hdr_len) { timeout--; continue; }
+                        if (len >= 14 + 4) {
+                            unsigned char src_ip[4], dst_ip[4];
+                            int i;
+                            for (i = 0; i < 4; i++) src_ip[i] = rx[14 + 12 + i];
+                            for (i = 0; i < 4; i++) dst_ip[i] = rx[14 + 16 + i];
+                            if (!tcp_verify_checksum(src_ip, dst_ip, rx + tcp_start, tcp_total)) {
+                                timeout--;
+                                continue;
+                            }
+                        }
+                        flags = rx[tcp_start + 13];
+                        if (flags & TCP_FLAG_RST) {
+                            conn->state = TCP_STATE_CLOSED;
+                            return 0;
+                        }
+                        if (conn->state == TCP_STATE_SYN_SENT && (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
+                            conn->seq_remote  = ((unsigned int)rx[tcp_start + 4] << 24) | ((unsigned int)rx[tcp_start + 5] << 16) | ((unsigned int)rx[tcp_start + 6] << 8) | (unsigned int)rx[tcp_start + 7];
+                            conn->seq_remote++;
+                            conn->state = TCP_STATE_ESTABLISHED;
 
-                        tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
-                        return 1;
+                            tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
+                            return 1;
+                        }
                     }
                 }
             }
+            timeout--;
         }
-        timeout--;
+        rto_cycles = rto_cycles * 2;
+        if (rto_cycles > 20000000)
+            rto_cycles = 20000000;
     }
 
     conn->state = TCP_STATE_CLOSED;
     return 0;
 }
 
+static int tcp_wait_for_ack(struct tcp_conn* conn, unsigned int ack_expected, int timeout_cycles)
+{
+    while (timeout_cycles > 0) {
+        unsigned char rx[2048];
+        int len = net_wait_packet(rx, sizeof(rx));
+        if (len > 0) {
+            arp_respond(rx, len);
+            if (len >= 34 && rx[12] == 0x08 && rx[13] == 0x00 && rx[23] == IP_PROTO_TCP) {
+                int ip_hdr_len = (rx[14] & 0x0F) * 4;
+                int tcp_start = 14 + ip_hdr_len;
+                unsigned short sport, dport;
+                if (tcp_start + 20 > len) { timeout_cycles--; continue; }
+                sport = ((unsigned short)rx[tcp_start] << 8) | rx[tcp_start + 1];
+                dport = ((unsigned short)rx[tcp_start + 2] << 8) | rx[tcp_start + 3];
+                if (sport != conn->dport || dport != conn->sport) { timeout_cycles--; continue; }
+                {
+                    int tcp_total = len - tcp_start;
+                    int tcp_hdr_len = ((rx[tcp_start + 12] >> 4) & 0x0F) * 4;
+                    if (tcp_total < tcp_hdr_len) { timeout_cycles--; continue; }
+                    {
+                        unsigned char src_ip[4], dst_ip[4];
+                        int i;
+                        for (i = 0; i < 4; i++) src_ip[i] = rx[14 + 12 + i];
+                        for (i = 0; i < 4; i++) dst_ip[i] = rx[14 + 16 + i];
+                        if (!tcp_verify_checksum(src_ip, dst_ip, rx + tcp_start, tcp_total)) {
+                            timeout_cycles--;
+                            continue;
+                        }
+                    }
+                }
+                {
+                    unsigned int rx_ack = ((unsigned int)rx[tcp_start + 8] << 24) | ((unsigned int)rx[tcp_start + 9] << 16) | ((unsigned int)rx[tcp_start + 10] << 8) | (unsigned int)rx[tcp_start + 11];
+                    if (rx_ack >= ack_expected)
+                        return 1;
+                }
+            }
+        }
+        timeout_cycles--;
+    }
+    return 0;
+}
+
 static void tcp_send_data_conn(struct tcp_conn* conn, unsigned char* data, int data_len)
 {
-    tcp_build_and_send(conn, TCP_FLAG_PSH | TCP_FLAG_ACK, data, data_len);
+    int rto_cycles = 1000000;
+    int retries = 0;
+    int copy_len = data_len;
+    if (copy_len > MAX_TCP_SEND_SIZE) copy_len = MAX_TCP_SEND_SIZE;
+    if (copy_len < 0) copy_len = 0;
+    {
+        int i;
+        for (i = 0; i < copy_len; i++)
+            conn->unacked_data[i] = data[i];
+    }
+    conn->unacked_len = copy_len;
+    conn->unacked_in_flight = 1;
+    conn->unacked_seq = conn->seq_local;
+
+    while (retries < 4) {
+        tcp_build_and_send(conn, TCP_FLAG_PSH | TCP_FLAG_ACK, conn->unacked_data, conn->unacked_len);
+        if (tcp_wait_for_ack(conn, conn->unacked_seq + (unsigned int)conn->unacked_len, rto_cycles)) {
+            conn->seq_local += (unsigned int)conn->unacked_len;
+            conn->unacked_in_flight = 0;
+            return;
+        }
+        retries++;
+        rto_cycles = rto_cycles * 2;
+        if (rto_cycles > 16000000) rto_cycles = 16000000;
+    }
+    conn->seq_local += (unsigned int)conn->unacked_len;
+    conn->unacked_in_flight = 0;
 }
 
 static int tcp_recv_data_conn(struct tcp_conn* conn, unsigned char* buf, int max_len, int timeout_cycles)
@@ -731,52 +843,77 @@ static int tcp_recv_data_conn(struct tcp_conn* conn, unsigned char* buf, int max
             arp_respond(rx, len);
 
             if (len >= 34 && rx[12] == 0x08 && rx[13] == 0x00 && rx[23] == IP_PROTO_TCP) {
+                int ip_hdr_len = (rx[14] & 0x0F) * 4;
+                int tcp_start = 14 + ip_hdr_len;
+                int tcp_data_offset;
+                int data_start;
+                int data_len;
                 unsigned short sport, dport;
-                sport = ((unsigned short)rx[34] << 8) | rx[35];
-                dport = ((unsigned short)rx[36] << 8) | rx[37];
+                unsigned char flags;
 
-                if (sport == conn->dport && dport == conn->sport) {
-                    unsigned char flags = rx[47];
-                    int ip_hdr_len = (rx[14] & 0x0F) * 4;
-                    int tcp_data_offset = ((rx[46] >> 4) & 0x0F) * 4;
-                    int data_start = 14 + ip_hdr_len + tcp_data_offset;
-                    int data_len = len - data_start;
+                if (tcp_start + 20 > len) { timeout_cycles--; continue; }
+                sport = ((unsigned short)rx[tcp_start] << 8) | rx[tcp_start + 1];
+                dport = ((unsigned short)rx[tcp_start + 2] << 8) | rx[tcp_start + 3];
 
-                    if (flags & TCP_FLAG_RST) {
-                        conn->state = TCP_STATE_CLOSED;
-                        return -1;
-                    }
-
-                    if (flags & TCP_FLAG_FIN) {
-                        conn->seq_remote++;
-                        tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
-                        conn->state = TCP_STATE_CLOSED;
-                        return 0;
-                    }
-
-                    if (data_len > 0) {
-                        unsigned int rx_seq = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
-
-                        if (rx_seq == conn->seq_remote) {
-                            int copy_len = data_len;
-                            if (copy_len > max_len) copy_len = max_len;
-                            {
-                                int i;
-                                for (i = 0; i < copy_len; i++) buf[i] = rx[data_start + i];
-                            }
-
-                            conn->seq_remote += (unsigned int)data_len;
-
-                            tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
-                            return copy_len;
+                if (sport != conn->dport || dport != conn->sport) {
+                    timeout_cycles--;
+                    continue;
+                }
+                {
+                    int tcp_total = len - tcp_start;
+                    int tcp_hdr_len = ((rx[tcp_start + 12] >> 4) & 0x0F) * 4;
+                    if (tcp_total < tcp_hdr_len) { timeout_cycles--; continue; }
+                    {
+                        unsigned char src_ip[4], dst_ip[4];
+                        int i;
+                        for (i = 0; i < 4; i++) src_ip[i] = rx[14 + 12 + i];
+                        for (i = 0; i < 4; i++) dst_ip[i] = rx[14 + 16 + i];
+                        if (!tcp_verify_checksum(src_ip, dst_ip, rx + tcp_start, tcp_total)) {
+                            timeout_cycles--;
+                            continue;
                         }
                     }
+                }
 
-                    if (flags & TCP_FLAG_SYN) {
-                        conn->seq_remote = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
-                        conn->seq_remote++;
+                flags = rx[tcp_start + 13];
+                tcp_data_offset = ((rx[tcp_start + 12] >> 4) & 0x0F) * 4;
+                data_start = tcp_start + tcp_data_offset;
+                data_len = len - data_start;
+
+                if (flags & TCP_FLAG_RST) {
+                    conn->state = TCP_STATE_CLOSED;
+                    return -1;
+                }
+
+                if (flags & TCP_FLAG_FIN) {
+                    conn->seq_remote++;
+                    tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
+                    conn->state = TCP_STATE_CLOSED;
+                    return 0;
+                }
+
+                if (data_len > 0) {
+                    unsigned int rx_seq = ((unsigned int)rx[tcp_start + 4] << 24) | ((unsigned int)rx[tcp_start + 5] << 16) | ((unsigned int)rx[tcp_start + 6] << 8) | (unsigned int)rx[tcp_start + 7];
+
+                    if (rx_seq == conn->seq_remote) {
+                        int copy_len = data_len;
+                        if (copy_len > max_len) copy_len = max_len;
+                        {
+                            int i;
+                            for (i = 0; i < copy_len; i++) buf[i] = rx[data_start + i];
+                        }
+
+                        conn->seq_remote += (unsigned int)data_len;
+
                         tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
+                        return copy_len;
                     }
+                }
+
+                if (flags & TCP_FLAG_SYN) {
+                    conn->seq_remote = ((unsigned int)rx[tcp_start + 4] << 24) | ((unsigned int)rx[tcp_start + 5] << 16) | ((unsigned int)rx[tcp_start + 6] << 8) | (unsigned int)rx[tcp_start + 7];
+                    conn->seq_remote++;
+                    tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
                 }
             }
         }
