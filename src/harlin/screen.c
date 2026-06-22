@@ -66,3 +66,12 @@ void screen_put_char(char c)
     }
     update_cursor();
 }
+
+void screen_puts(const char* s)
+{
+    if (!s) return;
+    while (*s) {
+        screen_put_char(*s);
+        s++;
+    }
+}

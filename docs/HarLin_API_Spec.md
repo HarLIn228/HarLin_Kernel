@@ -138,6 +138,8 @@ int Harlin_HttpGet(const char* host, const char* path);
 int Harlin_Resolve(const char* domain, u8* out_ip);
 ```
 
+`Harlin_InitNet` 初始化网卡并启动 DHCP 自动获取 IP 地址（超时约 2 秒）。DHCP 失败后回退到静态 IP（192.168.0.100）。`Harlin_HttpGet` 使用 HTTP/1.1 和 Chunked 传输编码。`Harlin_Resolve` 使用 DNS 协议进行域名解析。
+
 ## 11. 内存管理 API
 
 ```c
@@ -298,7 +300,19 @@ void Harlin_Boot(void);
 void Harlin_Shutdown(void);
 ```
 
-## 20. 系统调用接口
+`Harlin_Shutdown` 优先通过 ACPI PM1 控制寄存器触发 S5 软关机，失败后回退到 CLI + HLT。`Harlin_Boot` 在 initialization 尾声自动执行 ACPI 初始化。
+
+## 20. ACPI 电源管理 API
+
+```c
+int  acpi_init(void);
+void acpi_power_off(void);
+void acpi_reboot(void);
+```
+
+`acpi_init` 扫描 BIOS 内存区域查找 RSDP，通过 RSDT 定位 FADT 并从 DSDT 解析 \_S5 关机参数。`acpi_power_off` 向 PM1a_CNT 寄存器写入 SLP_TYPa | SLP_EN 触发 S5 状态。`acpi_reboot` 优先使用 FADT RESET_REG（I/O 端口），失败则回退到键盘控制器复位。
+
+## 21. 系统调用接口
 
 用户态程序通过软件中断 0x80 调用内核服务。系统调用号放在 RAX 中，参数遵循 System V AMD64 ABI。
 
@@ -332,14 +346,17 @@ void Harlin_Shutdown(void);
 | 25 | sys_getkeystate | 获取键盘修饰键状态 |
 | 26 | sys_keyled | 设置键盘 LED |
 | 27 | sys_setpriority | 设置当前进程优先级 |
+| 40 | sys_dlopen | 加载动态链接库 |
+| 41 | sys_dlsym | 查找动态库符号 |
+| 42 | sys_dlclose | 卸载动态链接库 |
 
 完整的系统调用表在内核中定义，并通过 `harlin_API.h` 向用户空间导出。
 
-## 21. 版本管理
+## 22. 版本管理
 
 API 版本跟随内核版本。主版本号仅在发生不兼容的 API 变更时增加，次版本号在向后兼容地增加功能时增加。
 
-## 22. 安全模型
+## 23. 安全模型
 
 - 内核代码和数据运行在 ring 0。
 - 用户进程运行在 ring 3。

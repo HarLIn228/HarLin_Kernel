@@ -1,7 +1,26 @@
 # HarLin Kernel 版本历史
 
 本项目采用 CalVer 版本号，格式为 `YY.D.X`：
-## H26.3.1（最新）
+## H26.4（最新）
+
+- ACPI 电源管理：RSDP 扫描、FADT 解析、`acpi_power_off()` 硬件关机、`acpi_reboot()` 系统重启
+- 网络协议栈增强：TCP 多连接支持（连接表管理，`tcp_connect_remote`/`tcp_send`/`tcp_recv`/`tcp_close_conn`）
+- DHCP 客户端：支持四步握手（Discover→Offer→Request→Ack），自动获取 IP/网关/DNS
+- `network_init()` 默认启用 DHCP，失败则回退静态配置
+- 动态链接器系统调用集成：`HARLIN_SYS_DLOPEN(40)`、`HARLIN_SYS_DLSYM(41)`、`HARLIN_SYS_DLCLOSE(42)`
+- 修复 `display.h` 缺少 `#include "harlin_API.h"` 导致的编译错误
+- 修复 `ipc.h` 缺少 `ipc_init()` 声明导致的编译错误
+- 修复 USB UHCI 驱动：SETUP 包未复制到 TD 缓冲区导致控制器发送垃圾数据
+- 修复 USB UHCI 驱动：DMA 缓冲区使用 `pmm_alloc` 可能分配高于 4GB 物理地址被截断，改用 `pmm_alloc_contiguous_low`
+- 修复 DHCP 发送期间 `local_ip` 被清零导致 ARP 响应污染 ARP 表，添加 `dhcp_in_progress` 标志屏蔽 ARP 响应
+- 修复 `sys_mmap`/`sys_munmap` 预检与映射间竞态条件（SMP 多线程），添加自旋锁保护
+- 修复 DHCP 请求中 `dhcp_build_common` 被调用两次的冗余问题
+- 修复 `Harlin_Shutdown` 中 `acpi_power_off` 失败无提示输出
+- 修复 TCP 连接复用后 `remote_mac` 残留旧数据，`tcp_alloc_conn` 改为清零整个结构体
+- 修复 `sys_kfree` 仅校验魔数未校验 `used` 字段，增强安全检查
+- 修复 ACPI RSDP 扫描缺失 EBDA 区域，部分 BIOS 无法发现 RSDP
+
+## H26.3.1
 
 - 应用目录重构：HarLin_App/ 存放系统应用，harlin.c 为默认启动程序，shell/ 为独立 Shell CHC 应用
 - Shell 从内核源码移除外置为独立 CHC 应用，支持命令：help、say、end、exit、run、exec、pid、beep、sleep、time、clearkeys

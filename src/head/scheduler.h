@@ -7,6 +7,7 @@
 #define PROC_STATE_READY    1
 #define PROC_STATE_RUNNING  2
 #define PROC_STATE_SLEEPING 3
+#define PROC_STATE_BLOCKED  4
 
 struct process {
     u64 rax, rcx, rdx, rbx, rbp, rsi, rdi;
@@ -39,6 +40,8 @@ void timer_handler(unsigned long* frame);
 void scheduler_tick(void);
 void scheduler_add_ready(int pid);
 void scheduler_sleep(u32 ms);
+void process_block_current(void);
+void process_wake(int pid);
 int scheduler_get_load(int cpu);
 
 #endif

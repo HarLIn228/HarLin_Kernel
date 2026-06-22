@@ -13,11 +13,16 @@
 #include "chc_loader.h"
 #include "scheduler.h"
 #include "pipe.h"
+#include "ipc.h"
 #include "smp.h"
 #include "spinlock.h"
 #include "kmalloc.h"
 #include "rtc.h"
 #include "harlin_chc.h"
+#include "pci.h"
+#include "audio.h"
+#include "usb.h"
+#include "acpi.h"
 
 
 extern void screen_put_char(char c);
@@ -356,6 +361,8 @@ void Harlin_Beep(u32 freq, u32 ms)
 void Harlin_Shutdown(void)
 {
     Harlin_Print("System halted.\n");
+    acpi_power_off();
+    Harlin_Print("ACPI power off failed.\n");
     Harlin_IntOff();
     for (;;) asm volatile ("hlt");
 }
@@ -389,19 +396,51 @@ void Harlin_Boot(void)
         }
     }
     outb(0x21, inb(0x21) | 0x04);
-    keyboard_init();
-    interrupts_enable();
-
     Harlin_InitPmm();
     Harlin_InitKmalloc();
     Harlin_InitVmm(0x20000);
+    keyboard_init();
     scheduler_init();
     timer_init();
     pipe_init();
+    ipc_init();
     Harlin_InitRtc();
     vmm_map(0xFEE00000, 0xFEE00000, VMM_PRESENT | VMM_WRITABLE);
     __asm__ volatile ("invlpg (%0)" : : "r"(0xFEE00000ULL) : "memory");
     Harlin_InitSmp();
+    interrupts_enable();
+
+    if (pci_init() < 0) {
+        screen_puts("[pci] bus not present\n");
+    } else {
+        screen_puts("[pci] scan done\n");
+    }
+
+    if (ata_init() == 0) {
+        screen_puts("[ata] device ready\n");
+    } else {
+        screen_puts("[ata] no device\n");
+    }
+
+    usb_init();
+
+    if (Harlin_AudioInit() == 0) {
+        screen_puts("[sb16] device ready\n");
+    } else {
+        screen_puts("[sb16] no device\n");
+    }
+
+    if (network_init() == 1) {
+        screen_puts("[net] device ready\n");
+    } else {
+        screen_puts("[net] no device\n");
+    }
+
+    if (acpi_init() == 0) {
+        screen_puts("[acpi] device ready\n");
+    } else {
+        screen_puts("[acpi] no device\n");
+    }
 
     chc_load(harlin_chc_data, harlin_chc_data_size);
     schedule();

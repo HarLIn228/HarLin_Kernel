@@ -131,7 +131,9 @@ void schedule(void)
 
     if (next < 0) {
         asm volatile ("pushq %0; popfq" : : "r"(flags) : "memory");
-        asm volatile ("sti; hlt; cli" : : : "memory");
+        while (pick_next_process() < 0) {
+            asm volatile ("sti; hlt; cli" : : : "memory");
+        }
         return;
     }
 
@@ -186,6 +188,20 @@ void scheduler_sleep(u32 ms)
     processes[current_process].sleep_until = tick_count + ms;
     processes[current_process].state = PROC_STATE_SLEEPING;
     schedule();
+}
+
+void process_block_current(void)
+{
+    if (current_process < 0 || current_process >= MAX_PROCESSES)
+        return;
+    processes[current_process].state = PROC_STATE_BLOCKED;
+    schedule();
+}
+
+void process_wake(int pid)
+{
+    if (pid >= 0 && pid < MAX_PROCESSES && processes[pid].state == PROC_STATE_BLOCKED)
+        processes[pid].state = PROC_STATE_READY;
 }
 
 int scheduler_get_load(int cpu)

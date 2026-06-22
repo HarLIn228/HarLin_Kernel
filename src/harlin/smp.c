@@ -126,11 +126,18 @@ void smp_ap_entry(u32 cpu_id)
 
 static void smp_start_cpu(u32 apic_id, int cpu_id)
 {
+    u64 phys;
+    u64 guard_phys;
     u64 stack_phys;
     u64 pml4;
-    stack_phys = pmm_alloc();
-    if (!stack_phys)
+    u64 guard_virt;
+    int j;
+
+    phys = pmm_alloc_contiguous(2);
+    if (!phys)
         return;
+    guard_phys = phys;
+    stack_phys = phys + 4096;
     stack_phys += AP_STACK_SIZE;
     smp_cpus[cpu_id].apic_id = apic_id;
     smp_cpus[cpu_id].cpu_id = cpu_id;
@@ -138,6 +145,13 @@ static void smp_start_cpu(u32 apic_id, int cpu_id)
     smp_cpus[cpu_id].online = 1;
     pml4 = vmm_get_phys(0x20000);
     smp_set_trampoline_param(pml4, stack_phys, (u64)smp_ap_entry, cpu_id);
+    for (j = 0; j < 2; j++) {
+        u64 gp = phys + (u64)j * 4096;
+        vmm_map(gp, gp, VMM_PRESENT | VMM_WRITABLE);
+    }
+    guard_virt = guard_phys;
+    vmm_unmap(guard_virt);
+    (void)phys;
     smp_send_init(apic_id);
     {
         volatile u32 i;

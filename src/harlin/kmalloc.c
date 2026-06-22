@@ -5,7 +5,7 @@
 
 #define KMALLOC_MIN_SIZE 16
 #define KMALLOC_MAX_SIZE 0x100000
-#define BLOCK_MAGIC 0x48414E44
+#define KMALLOC_BLOCK_MAGIC 0x48414E44
 #define KERNEL_HEAP_START 0xFFFF800000000000
 
 struct kmalloc_block {
@@ -76,7 +76,7 @@ static struct kmalloc_block* create_block(u32 size)
     next_heap_virt += total;
 
     block = (struct kmalloc_block*)virt;
-    block->magic = BLOCK_MAGIC;
+    block->magic = KMALLOC_BLOCK_MAGIC;
     block->size = total - sizeof(struct kmalloc_block);
     block->used = 0;
     block->pages = total / 4096;
@@ -98,7 +98,7 @@ void* kmalloc(u64 size)
         if (!block->used && block->size >= size) {
             if (block->size >= size + sizeof(struct kmalloc_block) + KMALLOC_MIN_SIZE) {
                 remaining = (struct kmalloc_block*)((u8*)block + sizeof(struct kmalloc_block) + size);
-                remaining->magic = BLOCK_MAGIC;
+                remaining->magic = KMALLOC_BLOCK_MAGIC;
                 remaining->size = block->size - size - sizeof(struct kmalloc_block);
                 remaining->used = 0;
                 remaining->pages = block->pages;
@@ -136,7 +136,7 @@ void kfree(void* ptr)
     if (!ptr)
         return;
     block = (struct kmalloc_block*)((u8*)ptr - sizeof(struct kmalloc_block));
-    if (block->magic != BLOCK_MAGIC)
+    if (block->magic != KMALLOC_BLOCK_MAGIC)
         return;
     spinlock_acquire(&kmalloc_lock);
     block->used = 0;
@@ -167,7 +167,7 @@ void* krealloc(void* ptr, u64 size)
         return 0;
     }
     block = (struct kmalloc_block*)((u8*)ptr - sizeof(struct kmalloc_block));
-    if (block->magic != BLOCK_MAGIC)
+    if (block->magic != KMALLOC_BLOCK_MAGIC)
         return 0;
     old_size = block->size;
     if (old_size >= size)
@@ -182,7 +182,9 @@ void* krealloc(void* ptr, u64 size)
         for (i = 0; i < old_size; i++)
             d[i] = s[i];
     }
-    kfree(ptr);
+    block = (struct kmalloc_block*)((u8*)ptr - sizeof(struct kmalloc_block));
+    if (block->magic == KMALLOC_BLOCK_MAGIC)
+        kfree(ptr);
     return new_ptr;
 }
 
@@ -192,7 +194,7 @@ u64 ksize(void* ptr)
     if (!ptr)
         return 0;
     block = (struct kmalloc_block*)((u8*)ptr - sizeof(struct kmalloc_block));
-    if (block->magic != BLOCK_MAGIC)
+    if (block->magic != KMALLOC_BLOCK_MAGIC)
         return 0;
     return block->size;
 }

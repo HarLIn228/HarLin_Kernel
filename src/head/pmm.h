@@ -11,6 +11,10 @@
 void pmm_init(void);
 u64 pmm_alloc(void);
 u64 pmm_alloc_contiguous(u32 count);
+u64 pmm_alloc_low(u32 count);
+u64 pmm_alloc_contiguous_low(u32 count);
 void pmm_free(u64 addr);
+
+#define ISA_DMA_LIMIT 0x01000000U
 
 #endif

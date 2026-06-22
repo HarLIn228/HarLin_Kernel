@@ -1,6 +1,7 @@
 #include "io.h"
 #include "interrupt.h"
 #include "keyboard.h"
+#include "screen.h"
 
 #define KEYBOARD_DATA_PORT 0x60
 #define KEYBOARD_STATUS_PORT 0x64
@@ -118,9 +119,63 @@ static void keyboard_irq_handler(void)
     }
 }
 
+static int ps2_wait_write(void)
+{
+    int i;
+    for (i = 0; i < 100000; i++) {
+        if ((inb(KEYBOARD_STATUS_PORT) & 0x02) == 0)
+            return 0;
+    }
+    return -1;
+}
+
+static int ps2_wait_read(void)
+{
+    int i;
+    for (i = 0; i < 100000; i++) {
+        if (inb(KEYBOARD_STATUS_PORT) & 0x01)
+            return 0;
+    }
+    return -1;
+}
+
+static void ps2_send_cmd(u8 cmd)
+{
+    ps2_wait_write();
+    outb(KEYBOARD_CMD_PORT, cmd);
+}
+
+static u8 ps2_read_data(void)
+{
+    if (ps2_wait_read() != 0)
+        return 0;
+    return inb(KEYBOARD_DATA_PORT);
+}
+
+static int ps2_self_test(void)
+{
+    ps2_send_cmd(0xAA);
+    if (ps2_wait_read() != 0)
+        return -1;
+    return (ps2_read_data() == 0x55) ? 0 : -1;
+}
+
+static int ps2_detect(void)
+{
+    u8 conf;
+    ps2_send_cmd(0x20);
+    conf = ps2_read_data();
+    if ((conf & 0x01) && (conf & 0x02)) return 2;
+    if (conf & 0x01) return 1;
+    if (conf & 0x02) return 1;
+    return 0;
+}
+
 void keyboard_init(void)
 {
     int flush_count = 0;
+    int ps2_ports = 0;
+    int self_test_ok = 0;
     shift_count = 0;
     ctrl_count = 0;
     alt_count = 0;
@@ -130,12 +185,24 @@ void keyboard_init(void)
     keybuf_overflow = 0;
     keybuf_head = 0;
     keybuf_tail = 0;
+    ps2_ports = ps2_detect();
+    if (ps2_ports > 0) {
+        self_test_ok = (ps2_self_test() == 0);
+        if (self_test_ok) {
+            ps2_send_cmd(0xAE);
+        }
+    }
     while ((inb(KEYBOARD_STATUS_PORT) & 0x01) && flush_count < 256) {
         inb(KEYBOARD_DATA_PORT);
         flush_count++;
     }
     keyboard_set_leds(0);
-    irq_register(1, keyboard_irq_handler);
+    if (ps2_ports > 0 && self_test_ok) {
+        irq_register(1, keyboard_irq_handler);
+        screen_puts("[ps2] keyboard ready\n");
+    } else {
+        screen_puts("[ps2] no keyboard\n");
+    }
 }
 
 int keyboard_has_data(void)

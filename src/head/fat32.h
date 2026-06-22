@@ -12,4 +12,9 @@ int  Harlin_Write(struct Harlin_File* file, const void* buf, u32 len);
 u32  Harlin_Size(struct Harlin_File* file);
 void Harlin_Close(struct Harlin_File* file);
 
+int  Harlin_Cd(const char* path);
+int  Harlin_Mkdir(const char* path);
+int  Harlin_Rmdir(const char* path);
+int  Harlin_GetCwd(char* buf, u32 size);
+
 #endif

@@ -15,5 +15,6 @@
 int ata_init(void);
 int ata_read_sectors(u64 lba, u8 count, void* buf);
 int ata_write_sectors(u64 lba, u8 count, const void* buf);
+int ata_is_present(void);
 
 #endif

@@ -62,6 +62,21 @@ typedef signed long long   s64;
 #define HARLIN_SYS_GETKEYSTATE  25
 #define HARLIN_SYS_KEYLED       26
 #define HARLIN_SYS_SETPRIORITY  27
+#define HARLIN_SYS_CD           28
+#define HARLIN_SYS_MKDIR        29
+#define HARLIN_SYS_RMDIR        30
+#define HARLIN_SYS_GETCWD       31
+#define HARLIN_SYS_MSGCREATE    32
+#define HARLIN_SYS_MSGSEND      33
+#define HARLIN_SYS_MSGRECV      34
+#define HARLIN_SYS_MSGDESTROY   35
+#define HARLIN_SYS_SEMCREATE    36
+#define HARLIN_SYS_SEMWAIT      37
+#define HARLIN_SYS_SEMPOST      38
+#define HARLIN_SYS_SEMDESTROY   39
+#define HARLIN_SYS_DLOPEN       40
+#define HARLIN_SYS_DLSYM        41
+#define HARLIN_SYS_DLCLOSE      42
 
 #define HARLIN_KEY_SHIFT  0x01
 #define HARLIN_KEY_CTRL   0x02
@@ -199,6 +214,26 @@ int  Harlin_Read(struct Harlin_File* file, void* buf, u32 len);
 int  Harlin_Write(struct Harlin_File* file, const void* buf, u32 len);
 u32  Harlin_Size(struct Harlin_File* file);
 void Harlin_Close(struct Harlin_File* file);
+int  Harlin_DeleteFile(const char* name);
+
+int  Harlin_Cd(const char* path);
+int  Harlin_Mkdir(const char* path);
+int  Harlin_Rmdir(const char* path);
+int  Harlin_GetCwd(char* buf, u32 size);
+
+int  Harlin_MsgCreate(void);
+int  Harlin_MsgSend(int qid, u32 type, const void* data, u32 len);
+int  Harlin_MsgRecv(int qid, u32* type, void* buf, u32 len, u32 expected_type);
+int  Harlin_MsgDestroy(int qid);
+
+int  Harlin_SemCreate(int initial);
+int  Harlin_SemWait(int sid);
+int  Harlin_SemPost(int sid);
+int  Harlin_SemDestroy(int sid);
+
+int  Harlin_DlOpen(const char* path);
+void* Harlin_DlSym(int lib_id, const char* name);
+int  Harlin_DlClose(int lib_id);
 
 int  Harlin_CreatePipe(struct Harlin_Pipe* pipe);
 int  Harlin_ReadPipe(struct Harlin_Pipe* pipe, void* buf, u32 len);

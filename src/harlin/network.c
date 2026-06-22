@@ -3,12 +3,10 @@
 #include "network.h"
 #include "interrupt.h"
 #include "pmm.h"
+#include "pci.h"
 #include "vmm.h"
 #include "kmalloc.h"
 #include "harlin_API.h"
-
-#define PCI_ADDR 0xCF8
-#define PCI_DATA 0xCFC
 
 #define RX_BUF_SIZE 0x2000
 #define TX_BUF_SIZE  2048
@@ -40,15 +38,39 @@ static unsigned char local_ip[4]  = {10, 0, 2, 15};
 static unsigned char remote_ip[4] = {0};
 
 static volatile int net_irq_done = 0;
+static volatile int dhcp_in_progress = 0;
 
 static void net_irq_handler(void);
 static int rtl_poll_packet(unsigned char* buf, int max_len);
 
-static unsigned short tcp_sport = 12345;
-static unsigned short tcp_dport = 80;
-static unsigned int   tcp_seq_local  = 0;
-static unsigned int   tcp_seq_remote = 0;
-static volatile int tcp_state = 0;
+static struct tcp_conn g_connections[MAX_TCP_CONN];
+static unsigned short tcp_next_sport = 40000;
+
+static struct tcp_conn* tcp_get_conn(int id)
+{
+    if (id < 0 || id >= MAX_TCP_CONN) return (struct tcp_conn*)0;
+    if (g_connections[id].state == TCP_STATE_CLOSED) return (struct tcp_conn*)0;
+    return &g_connections[id];
+}
+
+static int tcp_alloc_conn(void)
+{
+    int i;
+    for (i = 0; i < MAX_TCP_CONN; i++) {
+        if (g_connections[i].state == TCP_STATE_CLOSED) {
+            Harlin_Fill(&g_connections[i], 0, sizeof(struct tcp_conn));
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void tcp_free_conn(int id)
+{
+    if (id < 0 || id >= MAX_TCP_CONN) return;
+    g_connections[id].state = TCP_STATE_CLOSED;
+    g_connections[id].mac_resolved = 0;
+}
 
 static volatile unsigned char* rx_buf = 0;
 
@@ -107,34 +129,22 @@ static unsigned short net_checksum(unsigned char* data, int len)
     return (unsigned short)(~sum);
 }
 
-static unsigned int pci_read(unsigned char bus, unsigned char dev, unsigned char func, unsigned char off)
-{
-    unsigned int addr = 0x80000000 | ((unsigned int)bus << 16) | ((unsigned int)dev << 11) | ((unsigned int)func << 8) | (off & 0xFC);
-    outl(PCI_ADDR, addr);
-    return inl(PCI_DATA);
-}
-
-static void pci_write(unsigned char bus, unsigned char dev, unsigned char func, unsigned char off, unsigned int val)
-{
-    unsigned int addr = 0x80000000 | ((unsigned int)bus << 16) | ((unsigned int)dev << 11) | ((unsigned int)func << 8) | (off & 0xFC);
-    outl(PCI_ADDR, addr);
-    outl(PCI_DATA, val);
-}
-
 static int rtl_detect(void)
 {
-    unsigned char bus, dev;
-    unsigned int id, bar, cmd;
-    for (bus = 0; bus < 2; bus++) {
-        for (dev = 0; dev < 32; dev++) {
-            id = pci_read(bus, dev, 0, 0);
-            if (id == 0xFFFFFFFF || id == 0) continue;
-            if (id == 0x813910EC) {
-                cmd = pci_read(bus, dev, 0, 0x04);
-                pci_write(bus, dev, 0, 0x04, cmd | 0x07);
-                bar = pci_read(bus, dev, 0, 0x10);
+    struct pci_device dev;
+    int idx;
+    static const u16 known_ids[] = {
+        0x8139, 0x8138, 0x1300
+    };
+    int i;
+    for (i = 0; i < (int)(sizeof(known_ids) / sizeof(known_ids[0])); i++) {
+        idx = pci_find_device(0x10EC, known_ids[i], &dev);
+        if (idx >= 0) {
+            u64 bar;
+            pci_enable_busmaster(&dev);
+            if (pci_get_bar(&dev, 0, &bar) == 0) {
                 io_base = (unsigned short)(bar & 0xFFFC);
-                net_putstr("RTL8139 found at IO 0x");
+                net_putstr("RTL NIC found at IO 0x");
                 {
                     char hex[] = "0123456789ABCDEF";
                     screen_put_char(hex[(io_base >> 12) & 0xF]);
@@ -187,6 +197,12 @@ static void rtl_init(void)
         return;
     }
     rx_phys = vmm_get_phys((u64)rx_buf);
+    if (rx_phys >> 32) {
+        net_putstr("RTL8139 rx buffer above 4GB\n");
+        kfree((void*)rx_buf);
+        rx_buf = 0;
+        return;
+    }
     outl(io_base + 0x30, (unsigned int)rx_phys);
 
     outl(io_base + 0x40, 0x03000700);
@@ -211,29 +227,36 @@ static void net_irq_handler(void)
 static void net_wait_irq(void)
 {
     unsigned int timeout = 10000000;
+    unsigned long long flags;
+    asm volatile ("pushfq; popq %0" : "=r"(flags) : : "memory");
+    if (!(flags & (1ULL << 9)))
+        return;
     net_irq_done = 0;
     while (!net_irq_done && timeout--) {
-        asm volatile ("hlt" : : : "memory");
+        asm volatile ("sti; hlt; cli" : : : "memory");
     }
     if (!net_irq_done) {
         inw(io_base + 0x3E);
     }
 }
 
-static void rtl_send_packet(unsigned char* pkt, int len)
+static int rtl_send_packet(unsigned char* pkt, int len)
 {
     unsigned char* tx_buf;
     unsigned long phys;
     int i;
     int tx_len;
 
-    tx_len = len < 60 ? 60 : len;
+    if (!pkt || len <= 0)
+        return -1;
+    if (len > TX_BUF_SIZE)
+        return -1;
 
-    if (len > TX_BUF_SIZE) len = TX_BUF_SIZE;
+    tx_len = len < 60 ? 60 : len;
 
     tx_buf = (unsigned char*)kmalloc(TX_BUF_SIZE);
     if (!tx_buf)
-        return;
+        return -1;
 
     for (i = 0; i < len; i++) {
         tx_buf[i] = pkt[i];
@@ -243,12 +266,17 @@ static void rtl_send_packet(unsigned char* pkt, int len)
     }
 
     phys = vmm_get_phys((u64)tx_buf);
+    if (phys >> 32) {
+        kfree(tx_buf);
+        return -1;
+    }
     outl(io_base + 0x20, (unsigned int)phys);
     outl(io_base + 0x10, (unsigned int)(tx_len & 0xFFF));
 
     net_wait_irq();
 
     kfree(tx_buf);
+    return tx_len;
 }
 
 static int rtl_poll_packet(unsigned char* buf, int max_len)
@@ -361,6 +389,7 @@ static int arp_respond(unsigned char* rx, int len)
     int i;
     unsigned short op;
 
+    if (dhcp_in_progress) return 0;
     if (len < 42) return 0;
     if (rx[12] != 0x08 || rx[13] != 0x06) return 0;
 
@@ -592,7 +621,7 @@ static int tcp_compute_checksum(unsigned char* src_ip, unsigned char* dst_ip, un
     return net_checksum(pseudo, pseudo_len);
 }
 
-static void tcp_build_and_send(unsigned char* dest_mac, unsigned char* dest_ip,
+static void tcp_build_and_send(struct tcp_conn* conn,
                                 unsigned short flags, unsigned char* data, int data_len)
 {
     unsigned char tcp_seg[2048];
@@ -602,20 +631,20 @@ static void tcp_build_and_send(unsigned char* dest_mac, unsigned char* dest_ip,
     if (data_len > 2028) data_len = 2028;
     tcp_len = 20 + data_len;
 
-    tcp_seg[0] = (unsigned char)(tcp_sport >> 8);
-    tcp_seg[1] = (unsigned char)(tcp_sport & 0xFF);
-    tcp_seg[2] = (unsigned char)(tcp_dport >> 8);
-    tcp_seg[3] = (unsigned char)(tcp_dport & 0xFF);
+    tcp_seg[0] = (unsigned char)(conn->sport >> 8);
+    tcp_seg[1] = (unsigned char)(conn->sport & 0xFF);
+    tcp_seg[2] = (unsigned char)(conn->dport >> 8);
+    tcp_seg[3] = (unsigned char)(conn->dport & 0xFF);
 
-    tcp_seg[4] = (unsigned char)(tcp_seq_local >> 24);
-    tcp_seg[5] = (unsigned char)(tcp_seq_local >> 16);
-    tcp_seg[6] = (unsigned char)(tcp_seq_local >> 8);
-    tcp_seg[7] = (unsigned char)(tcp_seq_local & 0xFF);
+    tcp_seg[4] = (unsigned char)(conn->seq_local >> 24);
+    tcp_seg[5] = (unsigned char)(conn->seq_local >> 16);
+    tcp_seg[6] = (unsigned char)(conn->seq_local >> 8);
+    tcp_seg[7] = (unsigned char)(conn->seq_local & 0xFF);
 
-    tcp_seg[8]  = (unsigned char)(tcp_seq_remote >> 24);
-    tcp_seg[9]  = (unsigned char)(tcp_seq_remote >> 16);
-    tcp_seg[10] = (unsigned char)(tcp_seq_remote >> 8);
-    tcp_seg[11] = (unsigned char)(tcp_seq_remote & 0xFF);
+    tcp_seg[8]  = (unsigned char)(conn->seq_remote >> 24);
+    tcp_seg[9]  = (unsigned char)(conn->seq_remote >> 16);
+    tcp_seg[10] = (unsigned char)(conn->seq_remote >> 8);
+    tcp_seg[11] = (unsigned char)(conn->seq_remote & 0xFF);
 
     tcp_seg[12] = 0x50;
     tcp_seg[13] = flags;
@@ -625,32 +654,36 @@ static void tcp_build_and_send(unsigned char* dest_mac, unsigned char* dest_ip,
 
     for (i = 0; i < data_len; i++) tcp_seg[20 + i] = data[i];
 
-    cksum = tcp_compute_checksum(local_ip, dest_ip, tcp_seg, tcp_len);
+    cksum = tcp_compute_checksum(local_ip, conn->remote_ip, tcp_seg, tcp_len);
     tcp_seg[16] = (unsigned char)(cksum >> 8);
     tcp_seg[17] = (unsigned char)(cksum & 0xFF);
 
-    ip_send(dest_mac, dest_ip, IP_PROTO_TCP, tcp_seg, tcp_len);
+    ip_send(conn->remote_mac, conn->remote_ip, IP_PROTO_TCP, tcp_seg, tcp_len);
 
-    if (flags & TCP_FLAG_SYN) tcp_seq_local++;
+    if (flags & TCP_FLAG_SYN) conn->seq_local++;
     if (data_len > 0 && (flags & (TCP_FLAG_SYN | TCP_FLAG_FIN)) == 0) {
-        tcp_seq_local += (unsigned int)data_len;
+        conn->seq_local += (unsigned int)data_len;
     }
 }
 
-static int tcp_connect(void)
+static int tcp_connect_conn(struct tcp_conn* conn)
 {
     int timeout;
 
-    if (!gateway_resolved) {
-        net_putstr("ARP first\n");
-        return 0;
+    if (!conn->mac_resolved) {
+        if (!arp_resolve(conn->remote_ip)) return 0;
+        {
+            int i;
+            for (i = 0; i < 6; i++) conn->remote_mac[i] = gateway_mac[i];
+        }
+        conn->mac_resolved = 1;
     }
 
-    tcp_seq_local = 1000;
-    tcp_seq_remote = 0;
-    tcp_state = TCP_STATE_SYN_SENT;
+    conn->seq_local = 1000;
+    conn->seq_remote = 0;
+    conn->state = TCP_STATE_SYN_SENT;
 
-    tcp_build_and_send(gateway_mac, remote_ip, TCP_FLAG_SYN, (unsigned char*)0, 0);
+    tcp_build_and_send(conn, TCP_FLAG_SYN, (unsigned char*)0, 0);
 
     timeout = 10000000;
     while (timeout > 0) {
@@ -664,14 +697,14 @@ static int tcp_connect(void)
                 sport = ((unsigned short)rx[34] << 8) | rx[35];
                 dport = ((unsigned short)rx[36] << 8) | rx[37];
 
-                if (sport == tcp_dport && dport == tcp_sport) {
+                if (sport == conn->dport && dport == conn->sport) {
                     unsigned char flags = rx[47];
-                    if (tcp_state == TCP_STATE_SYN_SENT && (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
-                        tcp_seq_remote  = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
-                        tcp_seq_remote++;
-                        tcp_state = TCP_STATE_ESTABLISHED;
+                    if (conn->state == TCP_STATE_SYN_SENT && (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
+                        conn->seq_remote  = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
+                        conn->seq_remote++;
+                        conn->state = TCP_STATE_ESTABLISHED;
 
-                        tcp_build_and_send(gateway_mac, remote_ip, TCP_FLAG_ACK, (unsigned char*)0, 0);
+                        tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
                         return 1;
                     }
                 }
@@ -680,16 +713,16 @@ static int tcp_connect(void)
         timeout--;
     }
 
-    net_putstr("TCP connect timeout\n");
+    conn->state = TCP_STATE_CLOSED;
     return 0;
 }
 
-static void tcp_send_data(unsigned char* data, int data_len)
+static void tcp_send_data_conn(struct tcp_conn* conn, unsigned char* data, int data_len)
 {
-    tcp_build_and_send(gateway_mac, remote_ip, TCP_FLAG_PSH | TCP_FLAG_ACK, data, data_len);
+    tcp_build_and_send(conn, TCP_FLAG_PSH | TCP_FLAG_ACK, data, data_len);
 }
 
-static int tcp_recv_data(unsigned char* buf, int max_len, int timeout_cycles)
+static int tcp_recv_data_conn(struct tcp_conn* conn, unsigned char* buf, int max_len, int timeout_cycles)
 {
     while (timeout_cycles > 0) {
         unsigned char rx[2048];
@@ -702,30 +735,29 @@ static int tcp_recv_data(unsigned char* buf, int max_len, int timeout_cycles)
                 sport = ((unsigned short)rx[34] << 8) | rx[35];
                 dport = ((unsigned short)rx[36] << 8) | rx[37];
 
-                if (sport == net_htons(tcp_dport) && dport == net_htons(tcp_sport)) {
+                if (sport == conn->dport && dport == conn->sport) {
                     unsigned char flags = rx[47];
                     int ip_hdr_len = (rx[14] & 0x0F) * 4;
                     int tcp_data_offset = ((rx[46] >> 4) & 0x0F) * 4;
                     int data_start = 14 + ip_hdr_len + tcp_data_offset;
                     int data_len = len - data_start;
-                    unsigned int expected_seq = tcp_seq_remote;
 
                     if (flags & TCP_FLAG_RST) {
-                        tcp_state = TCP_STATE_CLOSED;
+                        conn->state = TCP_STATE_CLOSED;
                         return -1;
                     }
 
                     if (flags & TCP_FLAG_FIN) {
-                        tcp_seq_remote++;
-                        tcp_build_and_send(gateway_mac, remote_ip, TCP_FLAG_ACK, (unsigned char*)0, 0);
-                        tcp_state = TCP_STATE_CLOSED;
+                        conn->seq_remote++;
+                        tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
+                        conn->state = TCP_STATE_CLOSED;
                         return 0;
                     }
 
                     if (data_len > 0) {
                         unsigned int rx_seq = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
 
-                        if (rx_seq == tcp_seq_remote) {
+                        if (rx_seq == conn->seq_remote) {
                             int copy_len = data_len;
                             if (copy_len > max_len) copy_len = max_len;
                             {
@@ -733,17 +765,17 @@ static int tcp_recv_data(unsigned char* buf, int max_len, int timeout_cycles)
                                 for (i = 0; i < copy_len; i++) buf[i] = rx[data_start + i];
                             }
 
-                            tcp_seq_remote += (unsigned int)data_len;
+                            conn->seq_remote += (unsigned int)data_len;
 
-                            tcp_build_and_send(gateway_mac, remote_ip, TCP_FLAG_ACK, (unsigned char*)0, 0);
+                            tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
                             return copy_len;
                         }
                     }
 
                     if (flags & TCP_FLAG_SYN) {
-                        tcp_seq_remote = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
-                        tcp_seq_remote++;
-                        tcp_build_and_send(gateway_mac, remote_ip, TCP_FLAG_ACK, (unsigned char*)0, 0);
+                        conn->seq_remote = ((unsigned int)rx[38] << 24) | ((unsigned int)rx[39] << 16) | ((unsigned int)rx[40] << 8) | (unsigned int)rx[41];
+                        conn->seq_remote++;
+                        tcp_build_and_send(conn, TCP_FLAG_ACK, (unsigned char*)0, 0);
                     }
                 }
             }
@@ -753,18 +785,369 @@ static int tcp_recv_data(unsigned char* buf, int max_len, int timeout_cycles)
     return 0;
 }
 
-static void tcp_close(void)
+static void tcp_close_conn_internal(struct tcp_conn* conn)
 {
-    if (tcp_state == TCP_STATE_ESTABLISHED) {
-        tcp_state = TCP_STATE_FIN_SENT;
-        tcp_build_and_send(gateway_mac, remote_ip, TCP_FLAG_FIN | TCP_FLAG_ACK, (unsigned char*)0, 0);
+    if (conn->state == TCP_STATE_ESTABLISHED) {
+        conn->state = TCP_STATE_FIN_SENT;
+        tcp_build_and_send(conn, TCP_FLAG_FIN | TCP_FLAG_ACK, (unsigned char*)0, 0);
+    }
+}
+
+int tcp_connect_remote(unsigned char* ip, unsigned short port)
+{
+    int id = tcp_alloc_conn();
+    struct tcp_conn* conn;
+    if (id < 0) return -1;
+    conn = &g_connections[id];
+    conn->state = TCP_STATE_CLOSED;
+    conn->sport = tcp_next_sport++;
+    conn->dport = port;
+    {
+        int i;
+        for (i = 0; i < 4; i++) conn->remote_ip[i] = ip[i];
+    }
+    conn->mac_resolved = 0;
+    if (!tcp_connect_conn(conn)) {
+        tcp_free_conn(id);
+        return -1;
+    }
+    return id;
+}
+
+int tcp_send(int conn_id, unsigned char* data, int data_len)
+{
+    struct tcp_conn* conn = tcp_get_conn(conn_id);
+    if (!conn) return -1;
+    tcp_send_data_conn(conn, data, data_len);
+    return data_len;
+}
+
+int tcp_recv(int conn_id, unsigned char* buf, int max_len, int timeout)
+{
+    struct tcp_conn* conn = tcp_get_conn(conn_id);
+    if (!conn) return -1;
+    return tcp_recv_data_conn(conn, buf, max_len, timeout);
+}
+
+void tcp_close_conn(int conn_id)
+{
+    struct tcp_conn* conn = tcp_get_conn(conn_id);
+    if (!conn) return;
+    tcp_close_conn_internal(conn);
+    tcp_free_conn(conn_id);
+}
+
+static int dhcp_send_and_recv(unsigned char* tx_pkt, int tx_len,
+                               unsigned char* rx_buf, int rx_max,
+                               int wait_cycles)
+{
+    unsigned char bcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    unsigned char bcast_ip[4] = {255, 255, 255, 255};
+    unsigned char saved_ip[4];
+    int i, result = 0;
+
+    for (i = 0; i < 4; i++) saved_ip[i] = local_ip[i];
+    dhcp_in_progress = 1;
+    for (i = 0; i < 4; i++) local_ip[i] = 0;
+
+    rtl_send_packet(tx_pkt, tx_len);
+
+    for (i = 0; i < 4; i++) local_ip[i] = saved_ip[i];
+    dhcp_in_progress = 0;
+
+    while (wait_cycles > 0) {
+        int len = net_wait_packet(rx_buf, rx_max);
+        if (len > 0) {
+            if (len >= 42 && rx_buf[12] == 0x08 && rx_buf[13] == 0x00 && rx_buf[23] == IP_PROTO_UDP) {
+                unsigned short dport = ((unsigned short)rx_buf[36] << 8) | rx_buf[37];
+                if (dport == 68) {
+                    int ip_hdr_len = (rx_buf[14] & 0x0F) * 4;
+                    int udp_start = 14 + ip_hdr_len + 8;
+                    int dhcp_len = len - udp_start;
+                    if (dhcp_len > 0) {
+                        if (rx_buf[14 + ip_hdr_len + 2] == (unsigned char)((dhcp_len + 8) >> 8) &&
+                            rx_buf[14 + ip_hdr_len + 3] == (unsigned char)((dhcp_len + 8) & 0xFF)) {
+                            result = dhcp_len;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        wait_cycles--;
+    }
+
+    for (i = 0; i < 4; i++) local_ip[i] = saved_ip[i];
+    return result;
+}
+
+static int dhcp_build_common(unsigned char* pkt, int msg_type,
+                              unsigned char* req_ip, unsigned char* server_id)
+{
+    int i, off;
+
+    pkt[0] = 1;
+    pkt[1] = 1;
+    pkt[2] = 6;
+    pkt[3] = 0;
+    pkt[4] = 0x12; pkt[5] = 0x34; pkt[6] = 0x56; pkt[7] = 0x78;
+    pkt[8] = 0; pkt[9] = 0;
+    pkt[10] = 0x80; pkt[11] = 0x00;
+
+    for (i = 0; i < 4; i++) pkt[12 + i] = 0;
+    for (i = 0; i < 4; i++) pkt[16 + i] = 0;
+    for (i = 0; i < 4; i++) pkt[20 + i] = 0;
+    for (i = 0; i < 4; i++) pkt[24 + i] = 0;
+
+    for (i = 0; i < 6; i++) pkt[28 + i] = local_mac[i];
+    for (i = 6; i < 16; i++) pkt[28 + i] = 0;
+
+    for (i = 0; i < 64; i++) pkt[44 + i] = 0;
+    for (i = 0; i < 128; i++) pkt[108 + i] = 0;
+
+    pkt[236] = 0x63; pkt[237] = 0x82; pkt[238] = 0x53; pkt[239] = 0x63;
+
+    off = 240;
+    pkt[off++] = 53;
+    pkt[off++] = 1;
+    pkt[off++] = (unsigned char)msg_type;
+
+    if (req_ip) {
+        pkt[off++] = 50;
+        pkt[off++] = 4;
+        for (i = 0; i < 4; i++) pkt[off++] = req_ip[i];
+    }
+
+    if (server_id) {
+        pkt[off++] = 54;
+        pkt[off++] = 4;
+        for (i = 0; i < 4; i++) pkt[off++] = server_id[i];
+    }
+
+    if (msg_type == 1) {
+        pkt[off++] = 55;
+        pkt[off++] = 3;
+        pkt[off++] = 1;
+        pkt[off++] = 3;
+        pkt[off++] = 6;
+    }
+
+    pkt[off++] = 255;
+
+    while ((off - 14 - 20 - 8) < 300) {
+        pkt[off++] = 0;
+    }
+
+    return off;
+}
+
+static void dhcp_build_ip_udp(unsigned char* pkt, int total_len)
+{
+    int i, udp_len;
+    unsigned short cksum;
+
+    udp_len = total_len - 14 - 20;
+
+    pkt[14] = 0x45;
+    pkt[15] = 0x00;
+    pkt[16] = (unsigned char)((20 + udp_len) >> 8);
+    pkt[17] = (unsigned char)(20 + udp_len);
+    pkt[18] = 0x00; pkt[19] = 0x00;
+    pkt[20] = 0x00; pkt[21] = 0x00;
+    pkt[22] = 0x40;
+    pkt[23] = IP_PROTO_UDP;
+    pkt[24] = 0x00; pkt[25] = 0x00;
+
+    for (i = 0; i < 4; i++) pkt[26 + i] = 0;
+    for (i = 0; i < 4; i++) pkt[30 + i] = 255;
+
+    cksum = net_checksum(pkt + 14, 20);
+    pkt[24] = (unsigned char)(cksum >> 8);
+    pkt[25] = (unsigned char)(cksum & 0xFF);
+
+    pkt[34] = 0; pkt[35] = 68;
+    pkt[36] = 0; pkt[37] = 67;
+    pkt[38] = (unsigned char)(udp_len >> 8);
+    pkt[39] = (unsigned char)(udp_len & 0xFF);
+    pkt[40] = 0; pkt[41] = 0;
+
+    for (i = 0; i < 6; i++) {
+        pkt[i] = 0xFF;
+        pkt[i + 6] = local_mac[i];
+    }
+    pkt[12] = 0x08; pkt[13] = 0x00;
+}
+
+int dhcp_request(void)
+{
+    unsigned char pkt[1024];
+    unsigned char rx[2048];
+    unsigned char dhcp_rx[512];
+    unsigned char offered_ip[4];
+    unsigned char server_id[4];
+    unsigned char gateway[4];
+    unsigned char dns_server[4];
+    unsigned char subnet[4];
+    int i, off, dhcp_len;
+    int got_offer = 0;
+    unsigned char bcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+    net_putstr("DHCP: sending discover...\n");
+
+    off = dhcp_build_common(pkt, 1, (unsigned char*)0, (unsigned char*)0);
+    dhcp_build_ip_udp(pkt, off);
+    pkt[26] = 0; pkt[27] = 0; pkt[28] = 0; pkt[29] = 0;
+    for (i = 0; i < 6; i++) pkt[i] = 0xFF;
+    for (i = 0; i < 6; i++) pkt[i + 6] = local_mac[i];
+
+    dhcp_len = dhcp_send_and_recv(pkt, off, rx, sizeof(rx), 50000);
+    if (dhcp_len <= 0) {
+        net_putstr("DHCP: no offer\n");
+        return 0;
+    }
+
+    {
+        int ip_hl = (rx[14] & 0x0F) * 4;
+        int dhcp_start = 14 + ip_hl + 8;
+
+        if (rx[dhcp_start + 0] != 2) {
+            net_putstr("DHCP: not a reply\n");
+            return 0;
+        }
+
+        if (rx[dhcp_start + 1] != 1 || rx[dhcp_start + 2] != 6) {
+            net_putstr("DHCP: bad htype/hlen\n");
+            return 0;
+        }
+
+        for (i = 0; i < 4; i++) offered_ip[i] = rx[dhcp_start + 16 + i];
+
+        {
+            int opt_off = dhcp_start + 240;
+            int magic = (rx[opt_off] << 24) | (rx[opt_off+1] << 16) | (rx[opt_off+2] << 8) | rx[opt_off+3];
+            if (magic != 0x63825363) {
+                net_putstr("DHCP: bad magic\n");
+                return 0;
+            }
+            opt_off += 4;
+
+            gateway[0] = gateway[1] = gateway[2] = gateway[3] = 0;
+            dns_server[0] = dns_server[1] = dns_server[2] = dns_server[3] = 0;
+            subnet[0] = subnet[1] = subnet[2] = subnet[3] = 0;
+            server_id[0] = server_id[1] = server_id[2] = server_id[3] = 0;
+
+            while (opt_off < dhcp_start + dhcp_len) {
+                unsigned char tag = rx[opt_off++];
+                unsigned char len;
+                if (tag == 255) break;
+                if (tag == 0) continue;
+                len = rx[opt_off++];
+                if (tag == 53 && len == 1) {
+                    int mt = rx[opt_off];
+                    if (mt != 2) {
+                        net_putstr("DHCP: unexpected type ");
+                        net_putnum(mt);
+                        net_putstr("\n");
+                        return 0;
+                    }
+                } else if (tag == 54 && len == 4) {
+                    for (i = 0; i < 4; i++) server_id[i] = rx[opt_off + i];
+                } else if (tag == 1 && len == 4) {
+                    for (i = 0; i < 4; i++) subnet[i] = rx[opt_off + i];
+                } else if (tag == 3 && len == 4) {
+                    for (i = 0; i < 4; i++) gateway[i] = rx[opt_off + i];
+                } else if (tag == 6 && len == 4) {
+                    for (i = 0; i < 4; i++) dns_server[i] = rx[opt_off + i];
+                }
+                opt_off += len;
+            }
+        }
+    }
+
+    net_putstr("DHCP: offer received, sending request...\n");
+
+    off = dhcp_build_common(pkt, 3, offered_ip, server_id);
+    dhcp_build_ip_udp(pkt, off);
+    for (i = 0; i < 6; i++) pkt[i] = 0xFF;
+    for (i = 0; i < 6; i++) pkt[i + 6] = local_mac[i];
+
+    {
+        int sport_off = 14 + 20 + 0;
+        pkt[sport_off] = 0; pkt[sport_off + 1] = 68;
+    }
+
+    dhcp_len = dhcp_send_and_recv(pkt, off, rx, sizeof(rx), 50000);
+    if (dhcp_len <= 0) {
+        net_putstr("DHCP: no ack\n");
+        return 0;
+    }
+
+    {
+        int ip_hl = (rx[14] & 0x0F) * 4;
+        int dhcp_start = 14 + ip_hl + 8;
+
+        if (rx[dhcp_start + 0] != 2) {
+            net_putstr("DHCP: ack not a reply\n");
+            return 0;
+        }
+
+        for (i = 0; i < 4; i++) local_ip[i] = rx[dhcp_start + 16 + i];
+
+        {
+            int opt_off = dhcp_start + 240;
+            int magic = (rx[opt_off] << 24) | (rx[opt_off+1] << 16) | (rx[opt_off+2] << 8) | rx[opt_off+3];
+            if (magic != 0x63825363) {
+                net_putstr("DHCP: ack bad magic\n");
+                return 1;
+            }
+            opt_off += 4;
+
+            while (opt_off < dhcp_start + dhcp_len) {
+                unsigned char tag = rx[opt_off++];
+                unsigned char len;
+                if (tag == 255) break;
+                if (tag == 0) continue;
+                len = rx[opt_off++];
+                if (tag == 53 && len == 1) {
+                    int mt = rx[opt_off];
+                    if (mt != 5 && mt != 4) {
+                        net_putstr("DHCP: unexpected ack type ");
+                        net_putnum(mt);
+                        net_putstr("\n");
+                        return 0;
+                    }
+                } else if (tag == 1 && len == 4) {
+                    for (i = 0; i < 4; i++) subnet[i] = rx[opt_off + i];
+                } else if (tag == 3 && len == 4) {
+                    for (i = 0; i < 4; i++) gateway[i] = rx[opt_off + i];
+                } else if (tag == 6 && len == 4) {
+                    for (i = 0; i < 4; i++) dns_server[i] = rx[opt_off + i];
+                }
+                opt_off += len;
+            }
+        }
+
+        if (gateway[0] != 0 || gateway[1] != 0 || gateway[2] != 0 || gateway[3] != 0) {
+            unsigned char gw_ip[4];
+            for (i = 0; i < 4; i++) gw_ip[i] = gateway[i];
+            for (i = 0; i < 6; i++) gateway_mac[i] = 0;
+            gateway_resolved = 0;
+            arp_resolve(gw_ip);
+        }
+
+        net_putstr("DHCP: OK, IP ");
+        net_putnum(local_ip[0]); screen_put_char('.');
+        net_putnum(local_ip[1]); screen_put_char('.');
+        net_putnum(local_ip[2]); screen_put_char('.');
+        net_putnum(local_ip[3]);
+        net_putstr("\n");
+        return 1;
     }
 }
 
 int network_init(void)
 {
     int i;
-    unsigned char gateway_ip[4] = {10, 0, 2, 2};
 
     net_putstr("Network init...\n");
 
@@ -777,8 +1160,18 @@ int network_init(void)
 
     for (i = 0; i < 6; i++) gateway_mac[i] = 0;
 
-    if (!arp_resolve(gateway_ip)) {
-        net_putstr("Gateway unresolved, network limited\n");
+    net_putstr("DHCP...\n");
+    if (dhcp_request()) {
+        return 1;
+    }
+
+    net_putstr("DHCP failed, using static config\n");
+    {
+        unsigned char static_gw[4] = {10, 0, 2, 2};
+        local_ip[0] = 10; local_ip[1] = 0; local_ip[2] = 2; local_ip[3] = 15;
+        if (!arp_resolve(static_gw)) {
+            net_putstr("Gateway unresolved, network limited\n");
+        }
     }
 
     return 1;
@@ -806,6 +1199,9 @@ int network_http_get(const char* host, const char* path)
     int chunk_size = 0;
     int chunk_remaining = 0;
     int chunk_crlf = 0;
+    unsigned char dst_ip[4];
+    int conn_id;
+    struct tcp_conn* conn;
 
 #define CHUNK_STATE_SIZE     0
 #define CHUNK_STATE_DATA     1
@@ -822,11 +1218,11 @@ int network_http_get(const char* host, const char* path)
         if (!arp_resolve(gw_ip)) return 0;
     }
 
-    if (!ip_parse(host, remote_ip)) {
+    if (!ip_parse(host, dst_ip)) {
         net_putstr("Resolving ");
         net_putstr(host);
         net_putstr("...\n");
-        if (!dns_resolve(host, remote_ip)) {
+        if (!dns_resolve(host, dst_ip)) {
             net_putstr("DNS failed: ");
             net_putstr(host);
             screen_put_char('\n');
@@ -838,8 +1234,11 @@ int network_http_get(const char* host, const char* path)
     net_putstr(host);
     net_putstr("...\n");
 
-    tcp_dport = 80;
-    if (!tcp_connect()) return 0;
+    conn_id = tcp_connect_remote(dst_ip, 80);
+    if (conn_id < 0) return 0;
+
+    conn = tcp_get_conn(conn_id);
+    if (!conn) return 0;
 
     net_putstr("Connected, sending request...\n");
 
@@ -863,7 +1262,7 @@ int network_http_get(const char* host, const char* path)
         }
     }
 
-    tcp_send_data((unsigned char*)request, req_len);
+    tcp_send(conn_id, (unsigned char*)request, req_len);
     net_putstr("Waiting for response...\n\n");
 
     header_done = 0;
@@ -871,13 +1270,14 @@ int network_http_get(const char* host, const char* path)
     body_len = 0;
 
     while (1) {
-        int len = tcp_recv_data(rx_buf_data, sizeof(rx_buf_data) - 1, 5000000);
+        int len = tcp_recv(conn_id, rx_buf_data, sizeof(rx_buf_data) - 1, 5000000);
         if (len < 0) {
             net_putstr("\nConnection reset\n");
             break;
         }
         if (len == 0) {
-            if (tcp_state == TCP_STATE_CLOSED) {
+            conn = tcp_get_conn(conn_id);
+            if (!conn || conn->state == TCP_STATE_CLOSED) {
                 break;
             }
             net_putstr("\nNo more data\n");
@@ -966,7 +1366,7 @@ int network_http_get(const char* host, const char* path)
         }
     }
 
-    tcp_close();
+    tcp_close_conn(conn_id);
 
     screen_put_char('\n');
     net_putstr("Done, ");

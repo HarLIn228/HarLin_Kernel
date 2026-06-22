@@ -11,5 +11,6 @@ int  sb16_init(void);
 int  sb16_play(const u8* data, u32 len, u16 sample_rate, int stereo);
 void sb16_stop(void);
 int  sb16_is_playing(void);
+int  sb16_is_present(void);
 
 #endif
