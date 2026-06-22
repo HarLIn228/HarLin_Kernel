@@ -38,6 +38,19 @@ HarLin Kernel 是由 HarLin 独立开发的 x86_64 通用操作系统内核。
 - RTL8139 网络接口支持（默认不启用）
 - HTTP/1.1 客户端，支持 Chunked 传输编码
 
+## 仓库镜像
+
+| 平台 | 仓库地址 |
+|------|----------|
+| GitHub | `https://github.com/HarLin228/HarLin_Kernel` |
+| Gitee  | `https://gitee.com/HarLin228/Harlin-kernel` |
+
+```powershell
+# 克隆（任选其一）
+git clone https://github.com/HarLiin228/HarLin_Kernel.git
+git clone https://gitee.com/HarLin228/Harlin-kernel.git
+```
+
 ## 快速开始
 
 ### 环境要求
