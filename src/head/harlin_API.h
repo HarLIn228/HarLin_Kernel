@@ -163,8 +163,6 @@ int  Harlin_AudioPlayWav(const u8* data, u32 len);
 void Harlin_AudioStop(void);
 int  Harlin_AudioIsPlaying(void);
 
-struct shell_command;
-int Harlin_ShellRegister(const struct shell_command* cmd);
 
 int Harlin_InitDisk(void);
 int Harlin_ReadSectors(u64 lba, u8 count, void* buf);

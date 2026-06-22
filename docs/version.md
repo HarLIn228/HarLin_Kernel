@@ -3,14 +3,19 @@
 本项目采用 CalVer 版本号，格式为 `YY.D.X`：
 ## H26.3.1（最新）
 
-- 新增 Sound Blaster 16 音频驱动，支持 DMA 方式播放 16-bit PCM
-- 新增 WAV 文件解析器
-- 新增音频播放 API：Harlin_AudioInit、Harlin_AudioPlayWav、Harlin_AudioStop、Harlin_AudioIsPlaying
+- 应用目录重构：HarLin_App/ 存放系统应用，harlin.c 为默认启动程序，shell/ 为独立 Shell CHC 应用
+- Shell 从内核源码移除外置为独立 CHC 应用，支持命令：help、say、end、exit、run、exec、pid、beep、sleep、time、clearkeys
+- HCC 编译器工具链预编译二进制（bin/HCC.exe、bin/bin2h.exe）
+- User_CHC/ 目录存放预编译 CHC 程序（harlin.chc、shell.chc）
+- build.bat 更新为编译 CHC 应用的构建流程
+- 移除内核内置 shell.c/shell.h，清理 harlin_API.h 中废弃声明
+- Sound Blaster 16 音频驱动，支持 DMA 方式播放 16-bit PCM
+- WAV 文件解析器
+- 音频播放 API：Harlin_AudioInit、Harlin_AudioPlayWav、Harlin_AudioStop、Harlin_AudioIsPlaying
 - PMM 支持连续物理页分配 pmm_alloc_contiguous
-- 新增 HarLin Shell，支持 say/copy/setup/delete/cd/set/variable/constant/if/else/calculate/goto/run/end 等命令
-- Shell 支持外部命令注册 API：Harlin_ShellRegister
 - FAT32 支持文件删除：Harlin_DeleteFile
 - 更新 `README.md`、`手册.md`、`HarLin_API_Spec.md` 文档
+- `.gitignore` 重写为符合项目需求
 
 ## H26.3
 

@@ -28,23 +28,24 @@ set COUNT=0
 
 if exist build rmdir /s /q build
 if not exist build mkdir build
+if not exist User_CHC mkdir User_CHC
 
-.\bin\HCC.exe tests\hello.c -o build\init.chc >nul 2>build\error.log
+.\bin\HCC.exe HarLin_App\harlin.c -o User_CHC\harlin.chc >nul 2>build\error.log
 if errorlevel 1 (
-    echo %FAILURE% Creating init.chc
+    echo %FAILURE% Creating harlin.chc
     echo %ERR%
     type build\error.log
     goto error
 )
-.\bin\bin2h.exe build\init.chc build\init_chc.h init_chc_data >nul 2>build\error.log
+.\bin\bin2h.exe User_CHC\harlin.chc build\harlin_chc.h harlin_chc_data >nul 2>build\error.log
 if errorlevel 1 (
-    echo %FAILURE% Creating init_chc.h
+    echo %FAILURE% Creating harlin_chc.h
     echo %ERR%
     type build\error.log
     goto error
 )
 
-echo %SUCCESS% Created init.chc
+echo %SUCCESS% Created User_CHC\harlin.chc
 
 nasm -f bin src\asm\boot.asm -o build\boot.bin 2>build\error.log
 if errorlevel 1 (
@@ -121,10 +122,21 @@ if errorlevel 1 (
 )
 echo %SUCCESS% Creating disk image
 
+echo(
+echo Building shell.chc...
+.\bin\HCC.exe HarLin_App\shell\shell.c -o User_CHC\shell.chc >nul 2>build\shell_error.log
+if errorlevel 1 (
+    echo [Warning] shell.chc build failed (non-critical)
+    type build\shell_error.log
+) else (
+    echo Created User_CHC\shell.chc
+)
+
 rem del build\kernel.tmp 2>nul
 del build\asm_*.o 2>nul
 del build\*.o 2>nul
 if exist build\error.log del build\error.log
+if exist build\shell_error.log del build\shell_error.log
 
 echo.
 echo %GREEN%Build successful%RESET%

@@ -17,8 +17,7 @@
 #include "spinlock.h"
 #include "kmalloc.h"
 #include "rtc.h"
-#include "shell.h"
-#include "init_chc.h"
+#include "harlin_chc.h"
 
 
 extern void screen_put_char(char c);
@@ -400,7 +399,13 @@ void Harlin_Boot(void)
     timer_init();
     pipe_init();
     Harlin_InitRtc();
+    vmm_map(0xFEE00000, 0xFEE00000, VMM_PRESENT | VMM_WRITABLE);
+    __asm__ volatile ("invlpg (%0)" : : "r"(0xFEE00000ULL) : "memory");
     Harlin_InitSmp();
 
-    shell_run();
+    chc_load(harlin_chc_data, harlin_chc_data_size);
+    schedule();
+    for (;;) {
+        asm volatile("hlt");
+    }
 }

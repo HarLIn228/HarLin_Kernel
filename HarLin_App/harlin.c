@@ -2,6 +2,6 @@
 
 void _start(void)
 {
-    harlin_print("Hello World from C\r\n");
+    harlin_print("HarLin Kernel is OK\r\n");
     harlin_exit(0);
 }
