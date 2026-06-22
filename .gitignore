@@ -9,6 +9,17 @@ qmp_check.*
 dump_vga.py
 qemu_int.log
 
+# Bochs 日志
+build\bochs.log
+build\debugger.log
+build\serial.log
+build\bochs_stdout.log
+build\bochs_stderr.log
+
+# 临时文件
+.gitmessage
+*.tmp
+
 # 编辑器
 .vscode/
 .idea/
