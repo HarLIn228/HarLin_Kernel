@@ -26,11 +26,31 @@ start:
 read_track:
     push cx
 read_loop:
+    push bx
+    push cx
+    push dx
+    mov di, 3
+.retry:
     mov ah, 0x02
     mov al, 1
     mov dl, 0x00
     int 0x13
-    jc disk_error
+    jnc .read_ok
+    pushf
+    xor ah, ah
+    mov dl, 0x00
+    int 0x13
+    popf
+    dec di
+    jnz .retry
+    pop dx
+    pop cx
+    pop bx
+    jmp disk_error
+.read_ok:
+    pop dx
+    pop cx
+    pop bx
     add bx, 512
     inc cl
     cmp cl, 19
@@ -124,24 +144,6 @@ long_mode:
     mov rax, 0x10000
     call rax
     jmp $
-
-[BITS 16]
-setup_vesa:
-    mov ax, 0x4F02
-    mov bx, 0x4115
-    int 0x10
-    cmp ax, 0x004F
-    jne .vbe_done
-
-    xor ax, ax
-    mov es, ax
-    mov di, 0x7000
-    mov ax, 0x4F01
-    mov cx, 0x4115
-    int 0x10
-
-.vbe_done:
-    ret
 
 disk_error:
     mov al, ah

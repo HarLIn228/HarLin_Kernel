@@ -1,7 +1,29 @@
 # HarLin Kernel 版本历史
 
-本项目采用 CalVer 版本号，格式为 `YY.D.X`：
-## H26.4.1（最新）
+## v1.5.4
+
+- VMM 页表访问修复：vmm_get_phys 拆分为持锁版本 vmm_get_phys_locked 和无锁版本，修复直接将物理地址当作虚拟地址解引用的 bug
+- copy_from_user / copy_to_user / strncpy_from_user 添加 vmm_lock 保护，多核环境下防止临时映射窗口竞争
+- FAT32 可重入锁：新增 fat32_lock 自旋锁与深度计数器 fat32_lock_depth，find_entry_in_dir 等访问 sector_buf / cluster_buf 函数均加锁
+- 修复 Harlin_Mkdir 重复写入 0x1A 偏移的父目录簇号错误
+- 调度器 FS 段基址保存恢复：struct process 新增 fs_base 字段，timer_handler 与 schedule 中通过 rdmsr/wrmsr (MSR 0xC0000100) 保存恢复 FS 段基址
+- 修复 gdt_flush.asm jump_to_user 函数未正确传递第三个参数到 rdi 的问题
+- 修复 SMP AP 启动栈越界：smp_start_cpu 中 pmm_alloc_contiguous(2) 改为 pmm_alloc_contiguous(3)，stack_top 调整为 phys + 0x3000
+- 修复 SMP 启动未设置 TSS RSP0 的隐患
+- 自旋锁中断保存/恢复：spinlock.h / spinlock.c 新增 spinlock_acquire_irqsave、spinlock_release_irqrestore、spinlock_try_acquire_irqsave、spinlock_release_from_try
+- ATA IRQ 处理修复：ata_irq_handler 添加 ata_irq_lock 保护，使用 IRQ-save 自旋锁防止中断嵌套
+- 网络栈并发修复：新增 tcp_table_lock 保护 TCP 连接表分配/释放/发送/接收；net_irq_handler 加锁
+- USB UHCI 控制传输资源泄漏修复：qh_virt 映射失败时正确释放 qh 物理页与其他已分配资源
+- 进程用户页数组扩展：user_pages / user_vaddrs 从 16 扩展到 64，syscall.c 与 chc_loader.c 同步扩容上限
+- CHC 加载器 / 用户态内存分配数组越界修复
+- boot.asm 磁盘读取重试：单扇区读取失败最多重试 3 次，重置磁盘后重试，bx/cx/dx 寄存器保存恢复避免破坏
+- boot.asm 跨磁道 CH 递增读：单磁道读 18 扇区后递增 CH，跨磁道继续读，覆盖更大内核镜像
+- 修复 boot.asm 因 setup_vesa 占用空间导致超过 510 字节的编译错误，移除未使用的 VESA 初始化代码
+- 修复 speaker.asm 在 16 位模式下的 word 溢出警告，循环计数器拆为 3 段
+- display.c 字模扩展到 256 字符（包含 Latin-1 扩展字符），VGA 13h 模式下支持完整 8x16 字符集显示
+- PMM 物理内存分配加锁：pmm_alloc / pmm_free / pmm_alloc_contiguous 等位图操作添加 pmm_lock 保护
+
+## v1.5.3
 
 - 内核格式从 PE 改为 ELF 标准
 - 集成 LLVM 工具链 (clang + ld.lld)
@@ -13,7 +35,7 @@
 - 新增 VGA 13h Shell GLI (shell.c)
 - 保留 HarLinAPI 系统调用接口
 
-## H26.4
+## v1.5.2
 
 - ACPI 电源管理：RSDP 扫描、FADT 解析、`acpi_power_off()` 硬件关机、`acpi_reboot()` 系统重启
 - 网络协议栈增强：TCP 多连接支持（连接表管理，`tcp_connect_remote`/`tcp_send`/`tcp_recv`/`tcp_close_conn`）
@@ -32,7 +54,7 @@
 - 修复 `sys_kfree` 仅校验魔数未校验 `used` 字段，增强安全检查
 - 修复 ACPI RSDP 扫描缺失 EBDA 区域，部分 BIOS 无法发现 RSDP
 
-## H26.3.1
+## v1.5.1
 
 - 应用目录重构：HarLin_App/ 存放系统应用，harlin.c 为默认启动程序，shell/ 为独立 Shell CHC 应用
 - Shell 从内核源码移除外置为独立 CHC 应用，支持命令：help、say、end、exit、run、exec、pid、beep、sleep、time、clearkeys
@@ -48,9 +70,9 @@
 - 更新 `README.md`、`手册.md`、`HarLin_API_Spec.md` 文档
 - `.gitignore` 重写为符合项目需求
 
-## H26.3
+## v1.5
 
-- 大版本发布：新增多核 SMP 启动、自旋锁/原子操作、per-cpu 变量、更完善的调度器、更多系统调用、动态内存分配 kmalloc、RTC 时钟、扩展键盘功能
+- 新增多核 SMP 启动、自旋锁/原子操作、per-cpu 变量、更完善的调度器、更多系统调用、动态内存分配 kmalloc、RTC 时钟、扩展键盘功能
 - 新增多核 SMP 启动：Local APIC 初始化、IPI 发送、AP 引导 trampoline
 - 新增 spinlock 与原子操作：xchg/add/sub/cmpxchg
 - 新增 per-cpu 变量支持
@@ -71,7 +93,7 @@
 - 从公开 API 中移除 Harlin_IntOn / Harlin_IntOff，避免用户态调用
 - 更新 `HarLin_API_Spec.md`、`手册.md`、`HarLin_CHC_Format.md`、`HCC.md` 文档
 
-## H26.2.1
+## v1.4
 
 - 项目根目录由 `HarLIn_Boot` 重命名为 `Kernel`
 - 优化源码目录结构：`src/ASM` -> `src/asm`、`src/Sys_C` -> `src/harlin`、`tools` -> `hcc`
@@ -82,21 +104,21 @@
 - 新增 `docs/HCC.md` 文档，说明 HCC 命令用法与示例
 - 新增test文件夹
 
-## H26.2
+## v1.3.2
 
-- 大版本发布：内核启动崩溃 bug 已修复，API 与可执行格式完成重构
+- 内核启动崩溃 bug 已修复，API 与可执行格式完成重构
 - 简化 HarLin_API 命名，让 API 更短更易记（如 `Harlin_ConPrint` -> `Harlin_Print`、`Harlin_FsOpen` -> `Harlin_Open`）
 - 将 CX 用户态可执行格式升级为 CHC，魔数改为 `HARLINCHC`
 - 增强 CHC 加载器健壮性：严格校验头部边界、段大小、重定位对齐，失败时自动回滚已映射页面
 - 更新 API 规范和 CHC 格式文档
 
-## H26.1.6
+## v1.3.1
 
 - 修复 idt_load 汇编函数错误地从栈读取参数的问题，改为从 RDI 寄存器读取
 - 修复因 IDT 未正确加载导致的定时器中断 Triple Fault 崩溃
 - Bootloader 精简启动输出，保持纯黑屏启动
 
-## H26.1.5
+## v1.3
 
 - 实现 VGA 13H 图形模式（320x200，256 色），支持 set_mode/clear/put_pixel
 - 初始化 VGA 13H 标准 16 色调色板与灰度扩展色
@@ -125,7 +147,7 @@
 - 默认启动不初始化网络模块，保持内核地基稳定启动
 - 在 `docs/手册.md` 中新增网络模块启用说明
 
-## H26.1.4
+## v1.1.2
 
 - 修复 RTC 中断风暴导致的系统崩溃，禁用 CMOS 周期性中断与 Local APIC
 - 修复 PIC 初始化时序，添加 ICW 命令间延迟
@@ -166,7 +188,7 @@
 - 修复 QEMU 命令行 -no-hpet 参数错误
 - 修复启动时文件系统初始化顺序，先 DiskInit/PartitionInit 再挂载 FAT32 分区
 
-## H26.1.3
+## v1.1.1
 
 - 将键盘、ATA 磁盘、RTL8139 网络改为中断驱动，移除轮询
 - 修复 PIC 中断完成信号（EOI）导致 CPU 休眠的问题
@@ -178,7 +200,7 @@
 - 优化项目结构，文档统一归集到 docs/ 目录
 - 重写二次开发手册
 
-## H26.1.2
+## v1.1
 
 - 将内核从 x86 32 位保护模式迁移至 x86_64 64 位长模式
 - 重写引导程序，启用 PAE 分页与 PML4 页表机制
@@ -192,7 +214,7 @@
 - 移除内置 Shell，仅保留接口供第三方扩展
 - 更新手册与 README
 
-## H26.1.1
+## v1.0.1
 
 - 修复源代码安全隐患：
   - 变量名越界
@@ -203,7 +225,7 @@
   - 未初始化变量
 - 更新构建输出
 
-## H26.1
+## v1.0
 
 - 初始版本发布
 - MBR 引导扇区

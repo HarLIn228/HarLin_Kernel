@@ -12,9 +12,15 @@ beep:
     in al, 0x61
     or al, 0x03
     out 0x61, al
-    mov cx, 0x38000
+    mov cx, 0xFFFF
 .delay1:
     loop .delay1
+    mov cx, 0xFFFF
+.delay2:
+    loop .delay2
+    mov cx, 0xFFFF
+.delay3:
+    loop .delay3
     in al, 0x61
     and al, 0xFC
     out 0x61, al

@@ -7,6 +7,7 @@
 #include "vmm.h"
 #include "kmalloc.h"
 #include "harlin_API.h"
+#include "spinlock.h"
 
 #define RX_BUF_SIZE 0x2000
 #define TX_BUF_SIZE  2048
@@ -39,12 +40,16 @@ static unsigned char remote_ip[4] = {0};
 
 static volatile int net_irq_done = 0;
 static volatile int dhcp_in_progress = 0;
+static struct spinlock net_irq_lock = { 0 };
+static int net_irq_lock_inited = 0;
 
 static void net_irq_handler(void);
 static int rtl_poll_packet(unsigned char* buf, int max_len);
 
 static struct tcp_conn g_connections[MAX_TCP_CONN];
 static unsigned short tcp_next_sport = 40000;
+static struct spinlock tcp_table_lock = { 0 };
+static int tcp_table_lock_inited = 0;
 
 static struct tcp_conn* tcp_get_conn(int id)
 {
@@ -56,20 +61,31 @@ static struct tcp_conn* tcp_get_conn(int id)
 static int tcp_alloc_conn(void)
 {
     int i;
+    int found = -1;
+    if (!tcp_table_lock_inited) {
+        spinlock_init(&tcp_table_lock);
+        tcp_table_lock_inited = 1;
+    }
+    spinlock_acquire(&tcp_table_lock);
     for (i = 0; i < MAX_TCP_CONN; i++) {
         if (g_connections[i].state == TCP_STATE_CLOSED) {
             Harlin_Fill(&g_connections[i], 0, sizeof(struct tcp_conn));
-            return i;
+            found = i;
+            break;
         }
     }
-    return -1;
+    spinlock_release(&tcp_table_lock);
+    return found;
 }
 
 static void tcp_free_conn(int id)
 {
     if (id < 0 || id >= MAX_TCP_CONN) return;
+    if (!tcp_table_lock_inited) return;
+    spinlock_acquire(&tcp_table_lock);
     g_connections[id].state = TCP_STATE_CLOSED;
     g_connections[id].mac_resolved = 0;
+    spinlock_release(&tcp_table_lock);
 }
 
 static volatile unsigned char* rx_buf = 0;
@@ -219,9 +235,17 @@ static void rtl_init(void)
 
 static void net_irq_handler(void)
 {
-    unsigned short isr = inw(io_base + 0x3E);
+    u64 flags;
+    unsigned short isr;
+    if (!net_irq_lock_inited) {
+        spinlock_init(&net_irq_lock);
+        net_irq_lock_inited = 1;
+    }
+    flags = spinlock_acquire_irqsave(&net_irq_lock);
+    isr = inw(io_base + 0x3E);
     outw(io_base + 0x3E, isr);
     net_irq_done = 1;
+    spinlock_release_irqrestore(&net_irq_lock, flags);
 }
 
 static void net_wait_irq(void)
@@ -934,7 +958,10 @@ int tcp_connect_remote(unsigned char* ip, unsigned short port)
 {
     int id = tcp_alloc_conn();
     struct tcp_conn* conn;
+    int ok;
     if (id < 0) return -1;
+    if (!tcp_table_lock_inited) return -1;
+    spinlock_acquire(&tcp_table_lock);
     conn = &g_connections[id];
     conn->state = TCP_STATE_CLOSED;
     conn->sport = tcp_next_sport++;
@@ -944,8 +971,13 @@ int tcp_connect_remote(unsigned char* ip, unsigned short port)
         for (i = 0; i < 4; i++) conn->remote_ip[i] = ip[i];
     }
     conn->mac_resolved = 0;
-    if (!tcp_connect_conn(conn)) {
-        tcp_free_conn(id);
+    spinlock_release(&tcp_table_lock);
+    ok = tcp_connect_conn(conn);
+    if (!ok) {
+        spinlock_acquire(&tcp_table_lock);
+        conn->state = TCP_STATE_CLOSED;
+        conn->mac_resolved = 0;
+        spinlock_release(&tcp_table_lock);
         return -1;
     }
     return id;
@@ -953,25 +985,52 @@ int tcp_connect_remote(unsigned char* ip, unsigned short port)
 
 int tcp_send(int conn_id, unsigned char* data, int data_len)
 {
-    struct tcp_conn* conn = tcp_get_conn(conn_id);
-    if (!conn) return -1;
+    struct tcp_conn* conn;
+    if (conn_id < 0 || conn_id >= MAX_TCP_CONN) return -1;
+    if (!tcp_table_lock_inited) return -1;
+    spinlock_acquire(&tcp_table_lock);
+    conn = &g_connections[conn_id];
+    if (conn->state == TCP_STATE_CLOSED) {
+        spinlock_release(&tcp_table_lock);
+        return -1;
+    }
     tcp_send_data_conn(conn, data, data_len);
+    spinlock_release(&tcp_table_lock);
     return data_len;
 }
 
 int tcp_recv(int conn_id, unsigned char* buf, int max_len, int timeout)
 {
-    struct tcp_conn* conn = tcp_get_conn(conn_id);
-    if (!conn) return -1;
-    return tcp_recv_data_conn(conn, buf, max_len, timeout);
+    struct tcp_conn* conn;
+    int ret;
+    if (conn_id < 0 || conn_id >= MAX_TCP_CONN) return -1;
+    if (!tcp_table_lock_inited) return -1;
+    spinlock_acquire(&tcp_table_lock);
+    conn = &g_connections[conn_id];
+    if (conn->state == TCP_STATE_CLOSED) {
+        spinlock_release(&tcp_table_lock);
+        return -1;
+    }
+    ret = tcp_recv_data_conn(conn, buf, max_len, timeout);
+    spinlock_release(&tcp_table_lock);
+    return ret;
 }
 
 void tcp_close_conn(int conn_id)
 {
-    struct tcp_conn* conn = tcp_get_conn(conn_id);
-    if (!conn) return;
+    struct tcp_conn* conn;
+    if (conn_id < 0 || conn_id >= MAX_TCP_CONN) return;
+    if (!tcp_table_lock_inited) return;
+    spinlock_acquire(&tcp_table_lock);
+    conn = &g_connections[conn_id];
+    if (conn->state == TCP_STATE_CLOSED) {
+        spinlock_release(&tcp_table_lock);
+        return;
+    }
     tcp_close_conn_internal(conn);
-    tcp_free_conn(conn_id);
+    conn->state = TCP_STATE_CLOSED;
+    conn->mac_resolved = 0;
+    spinlock_release(&tcp_table_lock);
 }
 
 static int dhcp_send_and_recv(unsigned char* tx_pkt, int tx_len,
@@ -1374,8 +1433,14 @@ int network_http_get(const char* host, const char* path)
     conn_id = tcp_connect_remote(dst_ip, 80);
     if (conn_id < 0) return 0;
 
-    conn = tcp_get_conn(conn_id);
-    if (!conn) return 0;
+    if (!tcp_table_lock_inited) return 0;
+    spinlock_acquire(&tcp_table_lock);
+    conn = &g_connections[conn_id];
+    if (conn->state == TCP_STATE_CLOSED) {
+        spinlock_release(&tcp_table_lock);
+        return 0;
+    }
+    spinlock_release(&tcp_table_lock);
 
     net_putstr("Connected, sending request...\n");
 
@@ -1413,10 +1478,14 @@ int network_http_get(const char* host, const char* path)
             break;
         }
         if (len == 0) {
-            conn = tcp_get_conn(conn_id);
-            if (!conn || conn->state == TCP_STATE_CLOSED) {
+            if (!tcp_table_lock_inited) break;
+            spinlock_acquire(&tcp_table_lock);
+            conn = &g_connections[conn_id];
+            if (conn_id < 0 || conn_id >= MAX_TCP_CONN || conn->state == TCP_STATE_CLOSED) {
+                spinlock_release(&tcp_table_lock);
                 break;
             }
+            spinlock_release(&tcp_table_lock);
             net_putstr("\nNo more data\n");
             break;
         }

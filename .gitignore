@@ -19,6 +19,7 @@ build\bochs_stderr.log
 # 临时文件
 .gitmessage
 *.tmp
+w+number-overflow
 
 # 编辑器
 .vscode/

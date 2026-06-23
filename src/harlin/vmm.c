@@ -1,5 +1,6 @@
 #include "vmm.h"
 #include "pmm.h"
+#include "spinlock.h"
 
 u64 vmm_last_replaced_phys = 0;
 
@@ -19,6 +20,7 @@ static u64 g_tmp_pdpt_phys = 0;
 static u64 g_tmp_pd_phys = 0;
 static u64 g_tmp_pt_phys = 0;
 static u64 g_self_pt_phys = 0;
+static struct spinlock vmm_lock = { 0 };
 
 static void clear_page_phys(u64 phys)
 {
@@ -73,6 +75,7 @@ void vmm_init(u64 pml4_phys)
 {
     int i;
     u64 old_cr3;
+    spinlock_init(&vmm_lock);
     g_kernel_pml4_phys = pml4_phys;
     g_current_pml4_phys = pml4_phys;
 
@@ -136,8 +139,10 @@ void vmm_init(u64 pml4_phys)
 
 void vmm_switch(u64 pml4_phys)
 {
+    spinlock_acquire(&vmm_lock);
     g_current_pml4_phys = pml4_phys;
     asm volatile ("mov %0, %%cr3" : : "r"(pml4_phys) : "memory");
+    spinlock_release(&vmm_lock);
 }
 
 u64 vmm_current_pml4(void)
@@ -173,6 +178,7 @@ u64 vmm_clone_kernel_pml4(void)
         return 0;
     }
 
+    spinlock_acquire(&vmm_lock);
     set_temp_target(new_phys, VMM_PRESENT | VMM_WRITABLE);
     p = (volatile u64*)TEMP_WIN_VA;
     for (i = 0; i < 512; i++) p[i] = 0;
@@ -212,6 +218,7 @@ u64 vmm_clone_kernel_pml4(void)
     set_temp_target(new_pt_phys, VMM_PRESENT | VMM_WRITABLE);
     p = (volatile u64*)TEMP_WIN_VA;
     p[hi_pt_idx] = new_phys | VMM_PRESENT | VMM_WRITABLE;
+    spinlock_release(&vmm_lock);
 
     return new_phys;
 }
@@ -254,9 +261,12 @@ int vmm_map(u64 virt, u64 phys, u64 flags)
     u64 old_phys;
     u64 old_flags;
     int i;
+    int ret = -1;
 
     if ((flags & VMM_USER) && (virt < USER_ADDR_START || virt >= USER_ADDR_END))
         return -1;
+
+    spinlock_acquire(&vmm_lock);
 
     pml4_idx = (virt >> 39) & 0x1FF;
     pdpt_idx = (virt >> 30) & 0x1FF;
@@ -265,9 +275,9 @@ int vmm_map(u64 virt, u64 phys, u64 flags)
 
     pml4_phys = g_current_pml4_phys;
     pdpt_phys = get_or_alloc_table(pml4_phys, pml4_idx, flags);
-    if (!pdpt_phys) return -1;
+    if (!pdpt_phys) goto out;
     pd_phys = get_or_alloc_table(pdpt_phys, pdpt_idx, flags);
-    if (!pd_phys) return -1;
+    if (!pd_phys) goto out;
 
     vmm_last_replaced_phys = 0;
 
@@ -277,7 +287,7 @@ int vmm_map(u64 virt, u64 phys, u64 flags)
             old_phys = old_entry & 0x000FFFFFFFFFF000ULL;
             old_flags = old_entry & 0xFFF;
             pt_phys = pmm_alloc();
-            if (!pt_phys) return -1;
+            if (!pt_phys) goto out;
             clear_page_phys(pt_phys);
             for (i = 0; i < 512; i++) {
                 write_pt_entry(pt_phys, i,
@@ -292,13 +302,14 @@ int vmm_map(u64 virt, u64 phys, u64 flags)
                 (phys & 0x000FFFFFFFFFF000ULL) | VMM_PRESENT | flags);
             write_pt_entry(pd_phys, pd_idx,
                 (pt_phys & 0x000FFFFFFFFFF000ULL) | VMM_PRESENT | VMM_WRITABLE | (flags & VMM_USER));
-            return 0;
+            ret = 0;
+            goto out;
         } else {
             pt_phys = old_entry & 0x000FFFFFFFFFF000ULL;
         }
     } else {
         pt_phys = pmm_alloc();
-        if (!pt_phys) return -1;
+        if (!pt_phys) goto out;
         clear_page_phys(pt_phys);
         write_pt_entry(pd_phys, pd_idx,
             (pt_phys & 0x000FFFFFFFFFF000ULL) | VMM_PRESENT | VMM_WRITABLE | (flags & VMM_USER));
@@ -311,7 +322,10 @@ int vmm_map(u64 virt, u64 phys, u64 flags)
     }
     write_pt_entry(pt_phys, pt_idx,
         (phys & 0x000FFFFFFFFFF000ULL) | VMM_PRESENT | flags);
-    return 0;
+    ret = 0;
+out:
+    spinlock_release(&vmm_lock);
+    return ret;
 }
 
 int vmm_mapped(u64 virt)
@@ -359,7 +373,7 @@ void vmm_unmap(u64 virt)
     asm volatile ("invlpg (%0)" : : "r"(virt) : "memory");
 }
 
-u64 vmm_get_phys(u64 virt)
+static u64 vmm_get_phys_locked(u64 virt)
 {
     u64 pml4_idx = (virt >> 39) & 0x1FF;
     u64 pdpt_idx = (virt >> 30) & 0x1FF;
@@ -391,21 +405,36 @@ u64 vmm_get_phys(u64 virt)
     return (entry & 0x000FFFFFFFFFF000ULL) | (virt & 0xFFF);
 }
 
+u64 vmm_get_phys(u64 virt)
+{
+    u64 phys;
+    spinlock_acquire(&vmm_lock);
+    phys = vmm_get_phys_locked(virt);
+    spinlock_release(&vmm_lock);
+    return phys;
+}
+
 int copy_from_user(void* kdst, u64 usrc, u64 len)
 {
     u8* dst = (u8*)kdst;
     u64 off = 0;
+    int ret = -1;
+
+    if (len == 0)
+        return 0;
+    if (usrc < USER_ADDR_START || usrc + len < usrc || usrc + len > USER_ADDR_END)
+        return -1;
+
+    spinlock_acquire(&vmm_lock);
+
     while (off < len) {
         u64 phys;
         u64 page_remain;
         u64 chunk;
         u64 i;
         u8* src;
-        if (usrc + off < USER_ADDR_START || usrc + off >= USER_ADDR_END)
-            return -1;
-        phys = vmm_get_phys(usrc + off);
-        if (!phys)
-            return -1;
+        phys = vmm_get_phys_locked(usrc + off);
+        if (!phys) goto out;
         page_remain = 4096 - ((usrc + off) & 0xFFF);
         chunk = len - off;
         if (chunk > page_remain)
@@ -416,24 +445,33 @@ int copy_from_user(void* kdst, u64 usrc, u64 len)
             dst[off + i] = src[i];
         off += chunk;
     }
-    return 0;
+    ret = 0;
+out:
+    spinlock_release(&vmm_lock);
+    return ret;
 }
 
 int copy_to_user(u64 udst, const void* ksrc, u64 len)
 {
     const u8* src = (const u8*)ksrc;
     u64 off = 0;
+    int ret = -1;
+
+    if (len == 0)
+        return 0;
+    if (udst < USER_ADDR_START || udst + len < udst || udst + len > USER_ADDR_END)
+        return -1;
+
+    spinlock_acquire(&vmm_lock);
+
     while (off < len) {
         u64 phys;
         u64 page_remain;
         u64 chunk;
         u64 i;
         u8* dst;
-        if (udst + off < USER_ADDR_START || udst + off >= USER_ADDR_END)
-            return -1;
-        phys = vmm_get_phys(udst + off);
-        if (!phys)
-            return -1;
+        phys = vmm_get_phys_locked(udst + off);
+        if (!phys) goto out;
         page_remain = 4096 - ((udst + off) & 0xFFF);
         chunk = len - off;
         if (chunk > page_remain)
@@ -444,28 +482,40 @@ int copy_to_user(u64 udst, const void* ksrc, u64 len)
             dst[i] = src[off + i];
         off += chunk;
     }
-    return 0;
+    ret = 0;
+out:
+    spinlock_release(&vmm_lock);
+    return ret;
 }
 
 int strncpy_from_user(char* kdst, u64 usrc, u64 maxlen)
 {
     u64 i;
+    int ret = -1;
+
     if (maxlen == 0)
         return -1;
+    if (usrc < USER_ADDR_START || usrc + maxlen < usrc || usrc + maxlen > USER_ADDR_END)
+        return -1;
+
+    spinlock_acquire(&vmm_lock);
+
     for (i = 0; i < maxlen; i++) {
         u64 phys;
         u8 c;
-        if (usrc + i < USER_ADDR_START || usrc + i >= USER_ADDR_END)
-            return -1;
-        phys = vmm_get_phys(usrc + i);
-        if (!phys)
-            return -1;
+        phys = vmm_get_phys_locked(usrc + i);
+        if (!phys) goto out;
         set_temp_target(phys & ~0xFFFULL, VMM_PRESENT | VMM_USER);
         c = *(volatile u8*)(TEMP_WIN_VA + (phys & 0xFFF));
         kdst[i] = c;
-        if (c == 0)
-            return 0;
+        if (c == 0) {
+            ret = 0;
+            goto out;
+        }
     }
     kdst[maxlen - 1] = 0;
-    return 0;
+    ret = 0;
+out:
+    spinlock_release(&vmm_lock);
+    return ret;
 }

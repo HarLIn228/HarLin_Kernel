@@ -21,6 +21,22 @@
 #define HANDLE_KIND_MSGQ  2
 #define HANDLE_KIND_SEM   3
 
+#define MSR_FS_BASE 0xC0000100
+
+static inline u64 rdmsr_val(u32 msr)
+{
+    u32 lo = 0, hi = 0;
+    asm volatile ("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((u64)hi << 32) | (u64)lo;
+}
+
+static inline void wrmsr_val(u32 msr, u64 val)
+{
+    u32 lo = (u32)(val & 0xFFFFFFFFu);
+    u32 hi = (u32)(val >> 32);
+    asm volatile ("wrmsr" : : "c"(msr), "a"(lo), "d"(hi));
+}
+
 static struct process processes[MAX_PROCESSES];
 static int current_process_percpu[SMP_MAX_CPUS] = { [0 ... SMP_MAX_CPUS-1] = -1 };
 static struct spinlock scheduler_lock;
@@ -320,6 +336,7 @@ void schedule(void)
 
     if (prev >= 0 && processes[prev].state == PROC_STATE_RUNNING) {
         save_context(&processes[prev]);
+        processes[prev].fs_base = rdmsr_val(MSR_FS_BASE);
         processes[prev].state = PROC_STATE_READY;
     }
     current_process_percpu[cpu] = -1;
@@ -341,11 +358,12 @@ void schedule(void)
     if (processes[next].pml4_phys)
         vmm_switch(processes[next].pml4_phys);
     tss_set_rsp0_for_cpu(cpu, processes[next].kernel_stack_top);
+    wrmsr_val(MSR_FS_BASE, processes[next].fs_base);
     asm volatile ("pushq %0; popfq" : : "r"(flags) : "memory");
     if (processes[next].first_run) {
         processes[next].first_run = 0;
     }
-    jump_to_user(processes[next].rip, processes[next].rsp, 0);
+    jump_to_user(processes[next].rip, processes[next].rsp, processes[next].rdi);
 }
 
 static void process_free_kernel_stack(int pid)
@@ -488,6 +506,7 @@ void timer_handler(unsigned long* frame)
     if (processes[next].pml4_phys)
         vmm_switch(processes[next].pml4_phys);
     tss_set_rsp0_for_cpu(cpu, processes[next].kernel_stack_top);
+    wrmsr_val(MSR_FS_BASE, processes[next].fs_base);
     if (processes[next].first_run) {
         processes[next].first_run = 0;
         return;
@@ -536,6 +555,7 @@ void timer_handler(unsigned long* frame)
     cur->rip    = frame[16];
     cur->rflags = frame[18];
     cur->rsp    = frame[19];
+    cur->fs_base = rdmsr_val(MSR_FS_BASE);
 
     if (cur->time_slice > 0)
         cur->time_slice--;
@@ -561,6 +581,7 @@ void timer_handler(unsigned long* frame)
     if (processes[next].pml4_phys)
         vmm_switch(processes[next].pml4_phys);
     tss_set_rsp0_for_cpu(cpu, processes[next].kernel_stack_top);
+    wrmsr_val(MSR_FS_BASE, processes[next].fs_base);
 
     if (!processes[next].first_run) {
         frame[0]  = processes[next].rax;

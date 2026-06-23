@@ -30,6 +30,58 @@ int spinlock_try_acquire(struct spinlock* lk)
     return atomic_cmpxchg((volatile u64*)&lk->lock, 0, 1);
 }
 
+u64 spinlock_acquire_irqsave(struct spinlock* lk)
+{
+    u64 flags;
+    asm volatile (
+        "pushfq\n"
+        "popq %0\n"
+        "cli"
+        : "=r"(flags)
+        :
+        : "memory"
+    );
+    spinlock_acquire(lk);
+    return flags;
+}
+
+void spinlock_release_irqrestore(struct spinlock* lk, u64 flags)
+{
+    spinlock_release(lk);
+    if (flags & (1ULL << 9)) {
+        asm volatile ("sti" : : : "memory");
+    }
+}
+
+int spinlock_try_acquire_irqsave(struct spinlock* lk, u64* out_flags)
+{
+    u64 flags;
+    asm volatile (
+        "pushfq\n"
+        "popq %0\n"
+        "cli"
+        : "=r"(flags)
+        :
+        : "memory"
+    );
+    if (!spinlock_try_acquire(lk)) {
+        if (flags & (1ULL << 9)) {
+            asm volatile ("sti" : : : "memory");
+        }
+        return 0;
+    }
+    *out_flags = flags;
+    return 1;
+}
+
+void spinlock_release_from_try(struct spinlock* lk, u64 flags)
+{
+    spinlock_release(lk);
+    if (flags & (1ULL << 9)) {
+        asm volatile ("sti" : : : "memory");
+    }
+}
+
 u64 atomic_xchg_wrapper(volatile u64* ptr, u64 val)
 {
     return atomic_xchg(ptr, val);

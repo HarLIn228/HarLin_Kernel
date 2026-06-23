@@ -2,11 +2,14 @@
 #include "io.h"
 #include "interrupt.h"
 #include "pci.h"
+#include "spinlock.h"
 
 static u16 ata_base = 0;
 static u16 ata_ctrl = 0;
 static int ata_present = 0;
 static volatile int ata_irq_done = 0;
+static struct spinlock ata_irq_lock = { 0 };
+static int ata_irq_lock_inited = 0;
 
 static u8 ata_status(void)
 {
@@ -28,8 +31,15 @@ static int ata_wait_bsy(void)
 
 static void ata_irq_handler(void)
 {
+    u64 flags;
+    if (!ata_irq_lock_inited) {
+        spinlock_init(&ata_irq_lock);
+        ata_irq_lock_inited = 1;
+    }
+    flags = spinlock_acquire_irqsave(&ata_irq_lock);
     inb(ata_base + 7);
     ata_irq_done = 1;
+    spinlock_release_irqrestore(&ata_irq_lock, flags);
 }
 
 static int ata_wait_transfer(void)

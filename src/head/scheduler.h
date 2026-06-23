@@ -17,6 +17,7 @@ struct process {
     u64 rip;
     u64 rsp;
     u64 rflags;
+    u64 fs_base;
     int state;
     int first_run;
     int pid;
@@ -24,8 +25,8 @@ struct process {
     u32 priority;
     u32 time_slice;
     u32 sleep_until;
-    u64 user_pages[16];
-    u64 user_vaddrs[16];
+    u64 user_pages[64];
+    u64 user_vaddrs[64];
     int page_count;
     u64 next_alloc_virt;
     u64 pml4_phys;

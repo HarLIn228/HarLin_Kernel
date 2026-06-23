@@ -5,7 +5,6 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "fat32.h"
-#include "chc_loader.h"
 #include "pipe.h"
 #include "rtc.h"
 #include "smp.h"
@@ -170,7 +169,7 @@ static unsigned long sys_alloc(struct syscall_regs* r)
 
     vmm_map(virt, phys, VMM_PRESENT | VMM_WRITABLE | VMM_USER);
 
-    if (proc->page_count < 16) {
+    if (proc->page_count < 64) {
         proc->user_vaddrs[proc->page_count] = virt;
         proc->user_pages[proc->page_count++] = phys;
     }
@@ -290,39 +289,7 @@ static unsigned long sys_close(struct syscall_regs* r)
 
 static unsigned long sys_exec(struct syscall_regs* r)
 {
-    char kname[256];
-    struct Harlin_File file;
-    void* buf;
-    u32 size;
-    if (!r->rdi)
-        return (unsigned long)-1;
-    if (!user_ptr_valid(r->rdi, 1))
-        return (unsigned long)-1;
-    if (strncpy_from_user(kname, r->rdi, sizeof(kname)) != 0)
-        return (unsigned long)-1;
-    if (Harlin_Open(kname, &file) != HARLIN_FS_OK)
-        return (unsigned long)-1;
-    size = Harlin_Size(&file);
-    if (size == 0 || size > 4096) {
-        Harlin_Close(&file);
-        return (unsigned long)-1;
-    }
-    buf = (void*)pmm_alloc();
-    if (!buf) {
-        Harlin_Close(&file);
-        return (unsigned long)-1;
-    }
-    if (Harlin_Read(&file, buf, size) != (int)size) {
-        pmm_free((u64)buf);
-        Harlin_Close(&file);
-        return (unsigned long)-1;
-    }
-    Harlin_Close(&file);
-    if (chc_load(buf, size) >= 0) {
-        process_exit();
-        __builtin_unreachable();
-    }
-    pmm_free((u64)buf);
+    (void)r;
     return (unsigned long)-1;
 }
 
@@ -533,7 +500,7 @@ static unsigned long sys_mmap(struct syscall_regs* r)
             return (unsigned long)-1;
         }
         vmm_map(virt + i * 4096, phys, VMM_PRESENT | VMM_WRITABLE | VMM_USER);
-        if (proc->page_count < 16) {
+        if (proc->page_count < 64) {
             proc->user_vaddrs[proc->page_count] = virt + i * 4096;
             proc->user_pages[proc->page_count++] = phys;
         }

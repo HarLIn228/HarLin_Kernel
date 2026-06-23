@@ -36,14 +36,8 @@ D:\Bochs-3.0\
 ## 启动
 
 ```bash
-# 默认启动 (自动选择 Bochs，如果已安装)
-.\run.bat
-
-# 显式指定 Bochs
-.\run.bat bochs
-
-# 使用 QEMU
-.\run.bat qemu
+# 启动 Bochs
+.\run-bochs.bat
 ```
 
 ## 调试

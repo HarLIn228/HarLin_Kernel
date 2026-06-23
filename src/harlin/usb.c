@@ -267,6 +267,14 @@ static int uhci_control_transfer(struct uhci_controller* ctrl,
         return -1;
     }
     qh_virt = (struct uhci_qh*)uhci_phys_to_virt(qh_phys);
+    if (!qh_virt) {
+        uhci_free_phys_page(qh_phys);
+        uhci_free_phys_page(td_phys[0]);
+        uhci_free_phys_page(td_phys[1]);
+        uhci_free_phys_page(td_phys[2]);
+        if (data_buf_phys) uhci_free_phys_page(data_buf_phys);
+        return -1;
+    }
     Harlin_Fill(qh_virt, 0, sizeof(struct uhci_qh));
     qh_virt->link = UHCI_QH_LINK(0, 1);
     qh_virt->element = (u32)td_phys[0];

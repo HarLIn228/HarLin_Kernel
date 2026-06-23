@@ -1,6 +1,8 @@
 #include "pmm.h"
+#include "spinlock.h"
 
 static volatile u8* bitmap = (volatile u8*)PMM_BITMAP_ADDR;
+static struct spinlock pmm_lock = { 0 };
 
 extern char __bss_end[];
 
@@ -10,6 +12,8 @@ void pmm_init(void)
     u32 kernel_end_page;
     u32 bitmap_start_page;
     u32 bitmap_end_page;
+
+    spinlock_init(&pmm_lock);
 
     for (i = 0; i < PMM_TOTAL_PAGES / 8; i++)
         bitmap[i] = 0;
@@ -29,16 +33,21 @@ void pmm_init(void)
 u64 pmm_alloc(void)
 {
     u32 i, j;
+    u64 addr;
+    spinlock_acquire(&pmm_lock);
     for (i = 0; i < PMM_TOTAL_PAGES / 8; i++) {
         if (bitmap[i] == 0xFF)
             continue;
         for (j = 0; j < 8; j++) {
             if ((bitmap[i] & (1 << j)) == 0) {
                 bitmap[i] |= (1 << j);
-                return PMM_BASE_ADDR + ((i * 8 + j) * PMM_PAGE_SIZE);
+                addr = PMM_BASE_ADDR + ((i * 8 + j) * PMM_PAGE_SIZE);
+                spinlock_release(&pmm_lock);
+                return addr;
             }
         }
     }
+    spinlock_release(&pmm_lock);
     return 0;
 }
 
@@ -50,10 +59,12 @@ u64 pmm_alloc_contiguous(u32 count)
     u32 start;
     u32 full_loops = 0;
     u32 cur;
+    u64 result;
 
     if (count == 0)
         return 0;
 
+    spinlock_acquire(&pmm_lock);
     total_bits = PMM_TOTAL_PAGES;
     cur = last_idx;
     while (full_loops < 2) {
@@ -84,13 +95,16 @@ u64 pmm_alloc_contiguous(u32 count)
                     }
                     start = i * 8 + j;
                     last_idx = (start + count) % total_bits;
-                    return PMM_BASE_ADDR + (start * PMM_PAGE_SIZE);
+                    result = PMM_BASE_ADDR + (start * PMM_PAGE_SIZE);
+                    spinlock_release(&pmm_lock);
+                    return result;
                 }
             }
         }
         cur = 0;
         full_loops++;
     }
+    spinlock_release(&pmm_lock);
     return 0;
 }
 
@@ -104,8 +118,10 @@ u64 pmm_alloc_low(u32 count)
 {
     u32 i, j, k, found;
     u32 total_bits;
+    u64 result;
     if (count == 0)
         return 0;
+    spinlock_acquire(&pmm_lock);
     total_bits = PMM_TOTAL_PAGES;
     for (i = 0; i < total_bits / 8; i++) {
         if (bitmap[i] == 0xFF)
@@ -136,10 +152,13 @@ u64 pmm_alloc_low(u32 count)
                     u32 idx = (i * 8 + j + k);
                     bitmap[idx / 8] |= (1 << (idx % 8));
                 }
-                return PMM_BASE_ADDR + (i * 8 + j) * PMM_PAGE_SIZE;
+                result = PMM_BASE_ADDR + (i * 8 + j) * PMM_PAGE_SIZE;
+                spinlock_release(&pmm_lock);
+                return result;
             }
         }
     }
+    spinlock_release(&pmm_lock);
     return 0;
 }
 
@@ -156,5 +175,7 @@ void pmm_free(u64 addr)
     idx = (u32)((addr - PMM_BASE_ADDR) / PMM_PAGE_SIZE);
     if (idx >= PMM_TOTAL_PAGES)
         return;
+    spinlock_acquire(&pmm_lock);
     bitmap[idx / 8] &= ~(1 << (idx % 8));
+    spinlock_release(&pmm_lock);
 }

@@ -29,4 +29,5 @@ jump_to_user:
     push qword 0x202
     push qword (GDT_USER_CODE | 3)
     push rdi
+    mov rdi, rdx
     iretq

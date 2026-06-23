@@ -12,6 +12,11 @@ void spinlock_acquire(struct spinlock* lk);
 void spinlock_release(struct spinlock* lk);
 int spinlock_try_acquire(struct spinlock* lk);
 
+u64 spinlock_acquire_irqsave(struct spinlock* lk);
+void spinlock_release_irqrestore(struct spinlock* lk, u64 flags);
+int spinlock_try_acquire_irqsave(struct spinlock* lk, u64* out_flags);
+void spinlock_release_from_try(struct spinlock* lk, u64 flags);
+
 u64 atomic_xchg(volatile u64* ptr, u64 val);
 u64 atomic_add(volatile u64* ptr, u64 val);
 u64 atomic_sub(volatile u64* ptr, u64 val);
