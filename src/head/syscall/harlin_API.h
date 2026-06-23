@@ -136,11 +136,15 @@ void Harlin_CopyStr(char* dst, const char* src);
 int  Harlin_Compare(const char* a, const char* b);
 void Harlin_Copy(void* dst, const void* src, u32 n);
 void Harlin_Fill(void* dst, u8 val, u32 n);
+int  Harlin_UserPtrValid(u64 addr, u64 len);
+
+int  user_ptr_valid(u64 addr, u64 len);
 s32  Harlin_ToInt(const char* str);
 void Harlin_FromInt(s32 val, char* buf);
 
 int Harlin_InitNet(void);
 int Harlin_HttpGet(const char* host, const char* path);
+int Harlin_HttpsGet(const char* host, const char* path);
 int Harlin_Resolve(const char* domain, u8* out_ip);
 
 void Harlin_InitPmm(void);

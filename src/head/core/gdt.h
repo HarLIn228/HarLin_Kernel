@@ -14,4 +14,9 @@ void gdt_init_for_cpu(int cpu);
 void tss_set_rsp0(u64 rsp);
 void tss_set_rsp0_for_cpu(int cpu, u64 rsp);
 
+#define Harlin_GdtInit               gdt_init
+#define Harlin_GdtInitForCpu         gdt_init_for_cpu
+#define Harlin_TssSetRsp0            tss_set_rsp0
+#define Harlin_TssSetRsp0ForCpu      tss_set_rsp0_for_cpu
+
 #endif

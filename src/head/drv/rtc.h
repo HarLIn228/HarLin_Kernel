@@ -16,4 +16,8 @@ void rtc_init(void);
 void rtc_read(struct rtc_time* out);
 u64 rtc_boot_seconds(void);
 
+#define Harlin_RtcInit                rtc_init
+#define Harlin_RtcReadRaw             rtc_read
+#define Harlin_RtcBootSecondsRaw      rtc_boot_seconds
+
 #endif

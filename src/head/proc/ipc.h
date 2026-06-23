@@ -34,6 +34,8 @@ struct ipc_semaphore {
 
 void ipc_init(void);
 
+#define Harlin_IpcInit                ipc_init
+
 int Harlin_MsgCreate(void);
 int Harlin_MsgSend(int qid, u32 type, const void* data, u32 len);
 int Harlin_MsgRecv(int qid, u32* type, void* buf, u32 len, u32 expected_type);

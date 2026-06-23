@@ -1,6 +1,42 @@
 # HarLin Kernel version.md
 
-## v1.6.1(最新)
+## v1.6.2(最新)
+
+**新增**
+- 驱动层：新增 `drv_loader` 驱动注册/加载框架（`src/head/drv/drv_loader.h` + `src/harlin/drv/drv_loader.c`），支持 32 个子系统分类（对齐主流：storage/net/usb/display/audio/input/timer/power/bus/serio/tty/rtc/watchdog/thermal/gpio/crypto/blk/hid/fs/mfd/clk/pwm/net_wireless/sound/acpi/iio/platform/scsi/mtd/virtio/drm）、优先级、`probe/init/remove/suspend/resume` 标准入口与 `provider` 探测；缺位驱动自动回退默认实现
+- 硬件能力探测：新增 `feature_probe` 模块（`src/head/boot/feature_probe.h` + `src/harlin/boot/feature_probe.c`），通过 CPUID 探测 SMEP / SMAP / PCID / FSGSBASE / RDRAND / RDSEED / TSC invariant / x2APIC / APIC / NX；探测 HPET 基址；估算 TSC 频率；提供 `feature_rdrand()` 与 `feature_tsc()` 辅助函数
+- 安全：新增 `cr4_features` 模块（`src/head/sec/cr4_features.h` + `src/harlin/sec/cr4_features.c`），按 CPUID 结果置位 `CR4.PCID / SMEP / SMAP`；提供 `copy_from_user_safe` / `copy_to_user_safe` 安全拷贝封装
+- API：新增 `Harlin_UserPtrValid(addr, len)` 公开用户指针校验入口
+- API：新增 `Harlin_HttpsGet(host, path)` HTTPS 入口（v1.6.2 阶段回退到 HTTP，留作第三方 crypto 驱动接入点）
+- 启动流程：`Harlin_Boot` 在 SMP 初始化后依次调用 `feature_probe_init` → `cr4_features_enable` → `drv_loader_init` → `drv_load_all`
+- 文档：新增 `docs/默认硬件指南.md`（说明 v1.6.2 默认硬件基线、内置驱动集、规划中驱动、CR4 安全默认）
+- 文档：新增 `docs/第三方驱动接入教程.md`（含驱动模型、ops 结构、provider 探测器、loopback 虚拟网卡示例、NVMe 驱动骨架、调试技巧、最佳实践、API 速查）
+
+**修复**
+- USB：UHCI `uhci_control_transfer` 增加 `data_len ∈ [0, 4096]` 边界检查与 `data` 非空校验，防止描述符/数据阶段内核堆溢出
+- 网络：HTTP 客户端 `network_http_get` 移除栈上 4096 字节定长 `rx_buf_data`，改用 `kmalloc` 堆分配，函数出口与所有提前 `return` 统一经 `cleanup` 标签 `kfree`，消除大响应截断与栈溢出风险
+- 网络：HTTP 客户端升级协议解析，新增响应状态行解析（`HTTP/<v> <code>`）、`Content-Length` 提取与基于长度的提前终止、新增 `User-Agent: HarLin-Kernel/1.6.2` 与 `Accept: */*` 请求头、状态码返回（2xx/3xx 视为成功）
+- 文件系统：FAT32 `write_cluster` 增加 3 次重试 + 写后回读逐字节校验，写入失败时返回 `-1`，避免数据静默损坏
+- 中断：PIC `pic_init` 末尾对主片 IMR 寄存器做回读校验，若未稳定在 `0xF8`（屏蔽 IRQ5/6/7）则重写一次，避免启动期 IRQ 屏蔽丢失
+- 安全：`user_ptr_valid` 由 `syscall.c` 内的 `static` 提升为全局，便于 `cr4_features` 与其他模块复用，统一用户指针校验入口
+- 文档：清理 `docs/手册.md` 中 v1.6.1 已废除的 CHC 章节（13.x `run` 命令、17.3 `CHC 用户程序`、变量/条件/跳转示例段），与当前内置图形 Shell（`help/about/clear/info/beep/halt`）保持一致
+- 文档：`docs/HarLin_Api.md` 网络 API 段补充 `Harlin_HttpsGet`，系统调用表 `sys_exec` 标记为「已废除（保留入口返回 -1）」
+
+**变更**
+- 构建：`build.bat` CFLAGS 增加 `-I src\head\boot -I src\head\sec`，覆盖新增的 `feature_probe` / `cr4_features` 头文件目录
+- 文档：`README.md` 文档列表新增 `docs/默认硬件指南.md` 与 `docs/第三方驱动接入.md` 入口
+- 网络：`network_https_get` 暂为 HTTP 回退，签名与 `network_http_get` 一致，留作第三方 crypto 驱动对接钩子
+- 驱动框架：`enum drv_subsys` 由 8 扩到 32，参考 Linux 主要子系统但按 HarLin 习惯命名（`DRV_SUBSYS_MAX` 由 8 调为 32）：详见下方「驱动框架重命名」段
+- 驱动框架：新增 `drv_subsys_name(enum drv_subsys)` 公开接口（供日志与默认硬件指南使用）
+- 驱动框架：扩展 fallback 实现，新增 `drv_fallback_input` / `drv_fallback_audio` / `drv_fallback_rtc` / `drv_fallback_watchdog` / `drv_fallback_bus` 对应缺位回退提示
+- 驱动框架：fallback 输出统一改为 `[drv: fallback xxx]` 统一格式（重命名后为 media/link/screen/input/sound/rtc/guard/bridge）
+- 文档：`docs/第三方驱动接入.md` 子系统分类表与 API 速查段同步到 32 项
+- 头文件：新增 `src/head/stdlib/c.h` 聚合头，专供应用开发者（`#include <c.h>`），汇总 freestanding C 标准子集与 HarLin 常用类型/宏/错误码；内核本身不使用
+- ELF 完善：新增 `src/head/elf/elf.h` + `src/harlin/elf/elf.c` 完整解析器，覆盖 ELF32/ELF64、ET_REL/ET_EXEC/ET_DYNAMIC 加载，Program Header 全部类型（含 `PT_GNU_STACK/PT_GNU_EH_FRAME/PT_GNU_RELRO/PT_GNU_PROPERTY`），Section 头表与 `.symtab`/`.dynsym`/`.strtab`/`.rela*` 查找，Dynamic 段（`DT_*` 全部常见项）解析与重定位应用（`R_X86_64_NONE/64/PC32/32/32S/16/8/PC16/PC8/GLOB_DAT/JUMP_SLOT/RELATIVE/GOTPCREL`），所有公开 API 同步 `Harlin_Elf*` 前缀宏别名
+
+---
+
+## v1.6.1
 
 **新增**
 - 构建：多余参数检测功能，Error报错信息所有文字都显示为红色

@@ -32,4 +32,9 @@ void e820_dump(const struct e820_map* map);
 u64 e820_total_usable(const struct e820_map* map);
 u64 e820_top_usable(const struct e820_map* map);
 
+#define Harlin_E820Probe             e820_probe
+#define Harlin_E820Dump              e820_dump
+#define Harlin_E820TotalUsable       e820_total_usable
+#define Harlin_E820TopUsable         e820_top_usable
+
 #endif

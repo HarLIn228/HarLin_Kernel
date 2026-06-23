@@ -133,7 +133,26 @@ static int read_cluster(u32 cluster, void* buf)
 static int write_cluster(u32 cluster, const void* buf)
 {
     u32 sector = cluster_to_sector(cluster);
-    return ata_write_sectors(fs_partition_lba + sector, sectors_per_cluster, buf);
+    int retry = 3;
+    int rc;
+    while (retry-- > 0) {
+        rc = ata_write_sectors(fs_partition_lba + sector, sectors_per_cluster, buf);
+        if (rc == 0) {
+            u8 verify[sectors_per_cluster * 512];
+            int i;
+            if (ata_read_sectors(fs_partition_lba + sector, sectors_per_cluster, verify) != 0) {
+                continue;
+            }
+            for (i = 0; i < (int)(sectors_per_cluster * 512); i++) {
+                if (((const u8*)buf)[i] != verify[i]) {
+                    rc = -1;
+                    break;
+                }
+            }
+            if (rc == 0) return 0;
+        }
+    }
+    return -1;
 }
 
 static void write_le32(u8* p, u32 val)

@@ -32,4 +32,17 @@ int copy_from_user(void* kdst, u64 usrc, u64 len);
 int copy_to_user(u64 udst, const void* ksrc, u64 len);
 int strncpy_from_user(char* kdst, u64 usrc, u64 maxlen);
 
+#define Harlin_VmmInit               vmm_init
+#define Harlin_VmmMap                vmm_map
+#define Harlin_VmmUnmap              vmm_unmap
+#define Harlin_VmmGetPhys            vmm_get_phys
+#define Harlin_VmmMapped             vmm_mapped
+#define Harlin_VmmUnmapAndFree       vmm_unmap_and_free
+#define Harlin_VmmSwitch             vmm_switch
+#define Harlin_VmmCurrentPml4        vmm_current_pml4
+#define Harlin_VmmCloneKernelPml4    vmm_clone_kernel_pml4
+#define Harlin_CopyFromUser          copy_from_user
+#define Harlin_CopyToUser            copy_to_user
+#define Harlin_StrncpyFromUser       strncpy_from_user
+
 #endif

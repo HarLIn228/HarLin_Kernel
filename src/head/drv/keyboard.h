@@ -24,4 +24,14 @@ u8 keyboard_get_state(void);
 void keyboard_set_leds(u8 leds);
 int keyboard_set_scancode_set(u8 set);
 
+#define Harlin_KeyboardInit           keyboard_init
+#define Harlin_KeyboardHasData        keyboard_has_data
+#define Harlin_KeyboardPoll           keyboard_poll
+#define Harlin_KeyboardScancodeToAscii keyboard_scancode_to_ascii
+#define Harlin_KeyboardOverflowCount  keyboard_overflow_count
+#define Harlin_KeyboardFlush          keyboard_flush
+#define Harlin_KeyboardGetState       keyboard_get_state
+#define Harlin_KeyboardSetLeds        keyboard_set_leds
+#define Harlin_KeyboardSetScancodeSet keyboard_set_scancode_set
+
 #endif

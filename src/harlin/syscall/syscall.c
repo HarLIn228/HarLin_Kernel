@@ -45,7 +45,7 @@ static unsigned long sys_exit(struct syscall_regs* r)
     return 0;
 }
 
-static int user_ptr_valid(u64 addr, u64 len)
+int user_ptr_valid(u64 addr, u64 len)
 {
     if (len == 0)
         return 1;

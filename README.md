@@ -64,6 +64,8 @@ HarLin Kernel 是由 HarLin 独立开发的 x86_64 通用操作系统内核。
 - `docs/HarLin_Api.md`：API 规范
 - `docs/实践.md`：实践教程（10 个上手练习）
 - `docs/Bochs.md`：Bochs 模拟器使用指南
+- `docs/默认硬件指南.md`：默认硬件基线（2020s）
+- `docs/第三方驱动接入.md`：第三方驱动开发教程
 - `version.md`：版本更新记录
 
 ## 鸣谢

@@ -25,4 +25,16 @@ void smp_ap_entry(u32 cpu_id);
 u64 lapic_read(u32 reg);
 void lapic_write(u32 reg, u32 val);
 
+#define Harlin_SmpInit               smp_init
+#define Harlin_SmpCpuCount           smp_cpu_count
+#define Harlin_SmpGetCpu             smp_get_cpu
+#define Harlin_SmpCurrentCpuId       smp_current_cpu_id
+#define Harlin_SmpSendInit           smp_send_init
+#define Harlin_SmpSendSipi           smp_send_sipi
+#define Harlin_SmpSendIpi            smp_send_ipi
+#define Harlin_SmpBroadcastIpi       smp_broadcast_ipi
+#define Harlin_SmpApEntry            smp_ap_entry
+#define Harlin_LapicRead             lapic_read
+#define Harlin_LapicWrite            lapic_write
+
 #endif

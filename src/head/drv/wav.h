@@ -21,4 +21,6 @@ struct wav_header {
 
 int wav_parse(const u8* data, u32 len, struct wav_header* out, const u8** pcm, u32* pcm_len);
 
+#define Harlin_WavParse               wav_parse
+
 #endif

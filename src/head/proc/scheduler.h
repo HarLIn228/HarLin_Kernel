@@ -62,4 +62,26 @@ int scheduler_try_run_user(void);
 void scheduler_dispatch_from_timer(unsigned long* frame);
 void process_set_kernel_stack(int pid, u64 stack_top);
 
+#define Harlin_SchedulerInit         scheduler_init
+#define Harlin_ProcessCreate         process_create
+#define Harlin_ProcessGet            process_get
+#define Harlin_ProcessSetCurrent     process_set_current
+#define Harlin_Schedule              schedule
+#define Harlin_ProcessExit           process_exit
+#define Harlin_ProcessCurrent        process_current
+#define Harlin_TimerInit             timer_init
+#define Harlin_TimerHandler          timer_handler
+#define Harlin_SchedulerTick         scheduler_tick
+#define Harlin_SchedulerAddReady     scheduler_add_ready
+#define Harlin_SchedulerSleep        scheduler_sleep
+#define Harlin_ProcessBlockCurrent   process_block_current
+#define Harlin_ProcessWake           process_wake
+#define Harlin_SchedulerGetLoad      scheduler_get_load
+#define Harlin_SaveContext           save_context
+#define Harlin_ProcessRegisterHandle process_register_handle
+#define Harlin_ProcessUnregisterHandle process_unregister_handle
+#define Harlin_SchedulerTryRunUser   scheduler_try_run_user
+#define Harlin_SchedulerDispatchFromTimer scheduler_dispatch_from_timer
+#define Harlin_ProcessSetKernelStack process_set_kernel_stack
+
 #endif

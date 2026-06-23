@@ -13,6 +13,15 @@
 #include "scheduler.h"
 #include "pipe.h"
 #include "ipc.h"
+#include "kmalloc.h"
+#include "spinlock.h"
+
+#undef Harlin_Kmalloc
+#undef Harlin_Krealloc
+#undef Harlin_SpinlockInit
+#undef Harlin_SpinlockAcquire
+#undef Harlin_SpinlockRelease
+
 #include "smp.h"
 #include "spinlock.h"
 #include "kmalloc.h"
@@ -21,6 +30,9 @@
 #include "audio.h"
 #include "usb.h"
 #include "acpi.h"
+#include "drv_loader.h"
+#include "feature_probe.h"
+#include "cr4_features.h"
 
 
 extern void screen_put_char(char c);
@@ -135,6 +147,8 @@ void Harlin_Fill(void* dst, u8 val, u32 n)
     for (i = 0; i < n; i++) d[i] = val;
 }
 
+int Harlin_UserPtrValid(u64 addr, u64 len) { return user_ptr_valid(addr, len); }
+
 s32 Harlin_ToInt(const char* str)
 {
     s32 val = 0;
@@ -166,6 +180,7 @@ void Harlin_FromInt(s32 val, char* buf)
 
 int Harlin_InitNet(void)   { return network_init(); }
 int Harlin_HttpGet(const char* host, const char* path) { return network_http_get(host, path); }
+int Harlin_HttpsGet(const char* host, const char* path) { return network_https_get(host, path); }
 int Harlin_Resolve(const char* domain, u8* out_ip)          { return dns_resolve(domain, out_ip); }
 
 void Harlin_InitPmm(void) { pmm_init(); }
@@ -452,6 +467,16 @@ void Harlin_Boot(void)
     vmm_map(0xFEE00000, 0xFEE00000, VMM_PRESENT | VMM_WRITABLE);
     __asm__ volatile ("invlpg (%0)" : : "r"(0xFEE00000ULL) : "memory");
     Harlin_InitSmp();
+    feature_probe_init();
+    cr4_features_enable();
+    drv_loader_init();
+    drv_load_all();
+    {
+        const char* s;
+        for (s = "[BOOT] drv loaded\n"; *s; s++) {
+            asm volatile ("outb %0, %1" : : "a"((unsigned char)*s), "Nd"((unsigned short)0x0402));
+        }
+    }
     interrupts_enable();
     {
         const char* s = "[BOOT] interrupts enabled\n";

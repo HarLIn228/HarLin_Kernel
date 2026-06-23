@@ -17,4 +17,9 @@ int ata_read_sectors(u64 lba, u8 count, void* buf);
 int ata_write_sectors(u64 lba, u8 count, const void* buf);
 int ata_is_present(void);
 
+#define Harlin_AtaInit                ata_init
+#define Harlin_AtaReadSectors         ata_read_sectors
+#define Harlin_AtaWriteSectors        ata_write_sectors
+#define Harlin_AtaIsPresent           ata_is_present
+
 #endif

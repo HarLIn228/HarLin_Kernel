@@ -17,6 +17,11 @@ u64 percpu_get_offset(int cpu_id);
 struct percpu_area* percpu_current(void);
 void percpu_set_current(int cpu_id);
 
+#define Harlin_PercpuInitArea        percpu_init_area
+#define Harlin_PercpuGetOffset       percpu_get_offset
+#define Harlin_PercpuCurrent         percpu_current
+#define Harlin_PercpuSetCurrent      percpu_set_current
+
 #define PERCPU_VAR(name) (__percpu_##name)
 
 #endif

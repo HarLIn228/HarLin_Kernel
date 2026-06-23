@@ -18,4 +18,8 @@ int partition_init(void);
 int partition_get(int index, struct partition_entry* out);
 int partition_count(void);
 
+#define Harlin_PartitionInit          partition_init
+#define Harlin_PartitionGet           partition_get
+#define Harlin_PartitionCount         partition_count
+
 #endif

@@ -15,4 +15,12 @@ int mouse_get_y(void);
 u8 mouse_get_buttons(void);
 void mouse_set_position(int x, int y);
 
+#define Harlin_MouseInit              mouse_init
+#define Harlin_MouseHasData           mouse_has_data
+#define Harlin_MouseReadPacket        mouse_read_packet
+#define Harlin_MouseGetX              mouse_get_x
+#define Harlin_MouseGetY              mouse_get_y
+#define Harlin_MouseGetButtons        mouse_get_buttons
+#define Harlin_MouseSetPosition       mouse_set_position
+
 #endif

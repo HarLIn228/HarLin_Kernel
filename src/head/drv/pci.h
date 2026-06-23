@@ -34,4 +34,14 @@ int  pci_get_bar(struct pci_device* dev, int bar_index, u64* out_addr);
 int  pci_device_count(void);
 int  pci_get_device(int index, struct pci_device* out);
 
+#define Harlin_PciInit                pci_init
+#define Harlin_PciFindDevice          pci_find_device
+#define Harlin_PciFindClass           pci_find_class
+#define Harlin_PciRead                pci_read
+#define Harlin_PciWrite               pci_write
+#define Harlin_PciEnableBusmaster     pci_enable_busmaster
+#define Harlin_PciGetBar              pci_get_bar
+#define Harlin_PciDeviceCount         pci_device_count
+#define Harlin_PciGetDevice           pci_get_device
+
 #endif

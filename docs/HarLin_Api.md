@@ -326,7 +326,7 @@ void acpi_reboot(void);
 | 5 | sys_open | 打开文件 |
 | 6 | sys_read | 从文件读取 |
 | 7 | sys_close | 关闭文件 |
-| 8 | sys_exec | 执行 .chc 程序 |
+| 8 | sys_exec | 已废除（保留入口返回 -1） |
 | 9 | sys_yield | 让出 CPU |
 | 10 | sys_sleep | 休眠指定毫秒 |
 | 11 | sys_key_overflow | 获取键盘缓冲区溢出计数 |

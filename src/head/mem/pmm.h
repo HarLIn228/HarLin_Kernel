@@ -17,4 +17,11 @@ void pmm_free(u64 addr);
 
 #define ISA_DMA_LIMIT 0x01000000U
 
+#define Harlin_PmmInit               pmm_init
+#define Harlin_PmmAlloc              pmm_alloc
+#define Harlin_PmmAllocContiguous    pmm_alloc_contiguous
+#define Harlin_PmmAllocLow           pmm_alloc_low
+#define Harlin_PmmAllocContiguousLow pmm_alloc_contiguous_low
+#define Harlin_PmmFree               pmm_free
+
 #endif

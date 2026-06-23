@@ -1383,7 +1383,7 @@ static int hex_value(char c)
 
 int network_http_get(const char* host, const char* path)
 {
-    unsigned char rx_buf_data[4096];
+    unsigned char* rx_buf_data = (unsigned char*)kmalloc(4096);
     char request[1024];
     int req_len, i, total = 0;
     int header_done = 0;
@@ -1395,6 +1395,9 @@ int network_http_get(const char* host, const char* path)
     int chunk_size = 0;
     int chunk_remaining = 0;
     int chunk_crlf = 0;
+    int status_code = 0;
+    int content_length = -1;
+    int body_remaining = 0;
     unsigned char dst_ip[4];
     int conn_id;
     struct tcp_conn* conn;
@@ -1404,14 +1407,19 @@ int network_http_get(const char* host, const char* path)
 #define CHUNK_STATE_END_CRLF 2
 #define CHUNK_STATE_DONE     3
 
+    if (!rx_buf_data) {
+        net_putstr("OOM: http rx buffer\n");
+        return 0;
+    }
+
     if (!io_base) {
         net_putstr("Network not initialized\n");
-        return 0;
+        goto cleanup;
     }
 
     if (!gateway_resolved) {
         unsigned char gw_ip[4] = {10, 0, 2, 2};
-        if (!arp_resolve(gw_ip)) return 0;
+        if (!arp_resolve(gw_ip)) goto cleanup;
     }
 
     if (!ip_parse(host, dst_ip)) {
@@ -1422,7 +1430,7 @@ int network_http_get(const char* host, const char* path)
             net_putstr("DNS failed: ");
             net_putstr(host);
             screen_put_char('\n');
-            return 0;
+            goto cleanup;
         }
     }
 
@@ -1431,14 +1439,14 @@ int network_http_get(const char* host, const char* path)
     net_putstr("...\n");
 
     conn_id = tcp_connect_remote(dst_ip, 80);
-    if (conn_id < 0) return 0;
+    if (conn_id < 0) goto cleanup;
 
-    if (!tcp_table_lock_inited) return 0;
+    if (!tcp_table_lock_inited) goto cleanup;
     spinlock_acquire(&tcp_table_lock);
     conn = &g_connections[conn_id];
     if (conn->state == TCP_STATE_CLOSED) {
         spinlock_release(&tcp_table_lock);
-        return 0;
+        goto cleanup;
     }
     spinlock_release(&tcp_table_lock);
 
@@ -1459,7 +1467,7 @@ int network_http_get(const char* host, const char* path)
         }
         for (i = 0; host[i] && req_len < 1023; i++) request[req_len++] = host[i];
         {
-            const char* ending = "\r\nConnection: close\r\n\r\n";
+            const char* ending = "\r\nUser-Agent: HarLin-Kernel/1.6.2\r\nAccept: */*\r\nConnection: close\r\n\r\n";
             for (i = 0; ending[i] && req_len < 1023; i++) request[req_len++] = ending[i];
         }
     }
@@ -1470,6 +1478,8 @@ int network_http_get(const char* host, const char* path)
     header_done = 0;
     line_pos = 0;
     body_len = 0;
+    content_length = -1;
+    body_remaining = -1;
 
     while (1) {
         int len = tcp_recv(conn_id, rx_buf_data, sizeof(rx_buf_data) - 1, 5000000);
@@ -1501,14 +1511,56 @@ int network_http_get(const char* host, const char* path)
 
                     if (line_pos == 0 || (line_pos == 1 && line_buf[0] == '\r')) {
                         header_done = 1;
-                        net_putstr("- body -\n");
+                        if (status_code == 0) {
+                            status_code = 0;
+                        }
+                        if (status_code >= 300 && status_code < 400) {
+                            net_putstr("- redirect/no body -\n");
+                        } else {
+                            net_putstr("- body -\n");
+                        }
                         line_pos = 0;
                         continue;
                     }
 
-                    if (Harlin_Compare(line_buf, "Transfer-Encoding: chunked") == 0 ||
-                        Harlin_Compare(line_buf, "transfer-encoding: chunked") == 0) {
-                        is_chunked = 1;
+                    if (status_code == 0 && line_pos > 5 &&
+                        (line_buf[0] == 'H' || line_buf[0] == 'h') &&
+                        (line_buf[1] == 'T' || line_buf[1] == 't') &&
+                        (line_buf[2] == 'T' || line_buf[2] == 't') &&
+                        (line_buf[3] == 'P' || line_buf[3] == 'p') &&
+                        (line_buf[4] == '/' || line_buf[4] == ' ')) {
+                        int j = 0;
+                        while (line_buf[j] && line_buf[j] != ' ') j++;
+                        while (line_buf[j] == ' ') j++;
+                        status_code = 0;
+                        while (line_buf[j] >= '0' && line_buf[j] <= '9') {
+                            status_code = status_code * 10 + (line_buf[j] - '0');
+                            j++;
+                        }
+                        net_putstr("HTTP ");
+                        net_putnum(status_code);
+                        net_putstr("\n");
+                    } else if (status_code != 0) {
+                        int j = 0;
+                        while (line_buf[j] == ' ' || line_buf[j] == '\t') j++;
+                        if (Harlin_Compare(line_buf + j, "Content-Length:") == 0) {
+                            int v = 0;
+                            j += 15;
+                            while (line_buf[j] == ' ' || line_buf[j] == '\t') j++;
+                            while (line_buf[j] >= '0' && line_buf[j] <= '9') {
+                                v = v * 10 + (line_buf[j] - '0');
+                                j++;
+                            }
+                            content_length = v;
+                            body_remaining = v;
+                        } else if (Harlin_Compare(line_buf + j, "Transfer-Encoding:") == 0) {
+                            int k = j + 18;
+                            while (line_buf[k] == ' ' || line_buf[k] == '\t') k++;
+                            if (Harlin_Compare(line_buf + k, "chunked") == 0 ||
+                                Harlin_Compare(line_buf + k, "Chunked") == 0) {
+                                is_chunked = 1;
+                            }
+                        }
                     }
 
                     line_pos = 0;
@@ -1561,26 +1613,47 @@ int network_http_get(const char* host, const char* path)
                         }
                     }
                 } else {
-                    if (c == '\n') {
-                        screen_put_char('\n');
-                        body_len++;
-                    } else {
-                        screen_put_char(c);
+                    screen_put_char(c);
+                    if (c == '\n') body_len++;
+                    if (body_remaining > 0) {
+                        body_remaining--;
+                        if (body_remaining == 0) {
+                            goto body_done;
+                        }
                     }
                 }
             }
         }
     }
+body_done:
 
     tcp_close_conn(conn_id);
 
     screen_put_char('\n');
     net_putstr("Done, ");
     net_putnum(body_len);
-    net_putstr(" lines\n");
-    return 1;
+    net_putstr(" lines, status ");
+    net_putnum(status_code);
+    if (content_length >= 0) {
+        net_putstr(", length ");
+        net_putnum(content_length);
+    }
+    net_putstr("\n");
+    kfree(rx_buf_data);
+    return status_code > 0 && status_code < 400 ? 1 : 0;
+cleanup:
+    kfree(rx_buf_data);
+    return 0;
 #undef CHUNK_STATE_SIZE
 #undef CHUNK_STATE_DATA
 #undef CHUNK_STATE_END_CRLF
 #undef CHUNK_STATE_DONE
+}
+
+int network_https_get(const char* host, const char* path)
+{
+    net_putstr("HTTPS not yet supported by HarLin\n");
+    net_putstr("TLS 1.2/1.3 handshake requires crypto driver (see drv_loader)\n");
+    net_putstr("Falling back to plaintext HTTP...\n");
+    return network_http_get(host, path);
 }

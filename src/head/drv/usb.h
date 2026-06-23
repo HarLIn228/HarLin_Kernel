@@ -127,4 +127,9 @@ int  usb_controller_count(void);
 int  usb_device_count(void);
 int  usb_get_device(int index, struct usb_device* out);
 
+#define Harlin_UsbInit                usb_init
+#define Harlin_UsbControllerCount     usb_controller_count
+#define Harlin_UsbDeviceCount         usb_device_count
+#define Harlin_UsbGetDevice           usb_get_device
+
 #endif

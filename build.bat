@@ -26,7 +26,7 @@ set ERR=%RED%[Error]%RESET%
 
 set CC=D:\Code\Local_tool_library\LLVM\bin\clang.exe
 set LD=D:\Code\Local_tool_library\LLVM\bin\ld.lld.exe
-set CFLAGS=-ffreestanding -c -target x86_64-unknown-none-elf -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -I src\head\mem -I src\head\fs -I src\head\net -I src\head\drv -I src\head\acpi -I src\head\gpu -I src\head\syscall -I src\head\proc -I src\head\shell -I src\head\core -I build -mno-sse -mno-mmx -mabi=sysv
+set CFLAGS=-ffreestanding -c -target x86_64-unknown-none-elf -O2 -Wall -Wextra -fno-exceptions -fno-stack-protector -fno-stack-check -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nodefaultlibs -I src\head -I src\head\mem -I src\head\fs -I src\head\net -I src\head\drv -I src\head\acpi -I src\head\gpu -I src\head\syscall -I src\head\proc -I src\head\shell -I src\head\core -I src\head\boot -I src\head\sec -I src\head\elf -I src\head\stdlib -I build -mno-sse -mno-mmx -mabi=sysv
 
 set TOTAL=0
 for /r src\asm %%f in (*.asm) do set /a TOTAL+=1

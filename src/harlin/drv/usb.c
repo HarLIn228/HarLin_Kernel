@@ -170,6 +170,9 @@ static int uhci_control_transfer(struct uhci_controller* ctrl,
     u64 qh_phys;
     struct uhci_qh* qh_virt;
 
+    if (data_len < 0 || data_len > 4096) return -1;
+    if (data_len > 0 && !data) return -1;
+
     td_phys[0] = uhci_alloc_phys_page();
     td_phys[1] = uhci_alloc_phys_page();
     td_phys[2] = uhci_alloc_phys_page();

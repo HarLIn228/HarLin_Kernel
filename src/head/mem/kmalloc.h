@@ -21,4 +21,10 @@ void kfree(void* ptr);
 void* krealloc(void* ptr, u64 size);
 u64 ksize(void* ptr);
 
+#define Harlin_KmallocInit           kmalloc_init
+#define Harlin_Kmalloc               kmalloc
+#define Harlin_Kfree2                kfree
+#define Harlin_Krealloc              krealloc
+#define Harlin_Ksize2                ksize
+
 #endif

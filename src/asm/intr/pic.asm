@@ -43,5 +43,14 @@ pic_init:
     mov al, 0xFF
     out 0xA1, al
 
+    in al, 0x21
+    mov cl, al
+    and cl, 0x07
+    test cl, cl
+    jz .pic_mask_ok
+    mov al, 0xF8
+    out 0x21, al
+.pic_mask_ok:
+
     pop rax
     ret

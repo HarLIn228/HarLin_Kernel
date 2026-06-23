@@ -28,6 +28,7 @@ struct tcp_conn {
 
 int network_init(void);
 int network_http_get(const char* host, const char* path);
+int network_https_get(const char* host, const char* path);
 int dns_resolve(const char* domain, unsigned char* out_ip);
 
 int dhcp_request(void);
@@ -36,5 +37,15 @@ int tcp_connect_remote(unsigned char* ip, unsigned short port);
 int tcp_send(int conn_id, unsigned char* data, int data_len);
 int tcp_recv(int conn_id, unsigned char* buf, int max_len, int timeout);
 void tcp_close_conn(int conn_id);
+
+#define Harlin_NetInit                network_init
+#define Harlin_HttpGetRaw             network_http_get
+#define Harlin_HttpsGetRaw            network_https_get
+#define Harlin_DnsResolve             dns_resolve
+#define Harlin_DhcpRequest            dhcp_request
+#define Harlin_TcpConnectRemote       tcp_connect_remote
+#define Harlin_TcpSend                tcp_send
+#define Harlin_TcpRecv                tcp_recv
+#define Harlin_TcpCloseConn           tcp_close_conn
 
 #endif
