@@ -698,28 +698,20 @@ static unsigned long sys_sem_destroy(struct syscall_regs* r)
 
 static unsigned long sys_dlopen(struct syscall_regs* r)
 {
-    char kpath[256];
-    if (!r->rdi || !user_ptr_valid(r->rdi, 1))
-        return (unsigned long)-1;
-    if (strncpy_from_user(kpath, r->rdi, sizeof(kpath)) != 0)
-        return (unsigned long)-1;
-    return (unsigned long)Harlin_DlOpen(kpath);
+    (void)r;
+    return (unsigned long)-1;
 }
 
 static unsigned long sys_dlsym(struct syscall_regs* r)
 {
-    int lib_id = (int)r->rdi;
-    char kname[256];
-    if (!r->rsi || !user_ptr_valid(r->rsi, 1))
-        return (unsigned long)0;
-    if (strncpy_from_user(kname, r->rsi, sizeof(kname)) != 0)
-        return (unsigned long)0;
-    return (unsigned long)Harlin_DlSym(lib_id, kname);
+    (void)r;
+    return (unsigned long)0;
 }
 
 static unsigned long sys_dlclose(struct syscall_regs* r)
 {
-    return (unsigned long)Harlin_DlClose((int)r->rdi);
+    (void)r;
+    return (unsigned long)-1;
 }
 
 #include "display.h"

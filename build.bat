@@ -42,21 +42,33 @@ if errorlevel 1 (
 set /a COUNT+=1
 echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling boot.asm
 
+nasm -f bin src\asm\stage2.asm -o build\stage2.bin 2>build\error.log
+if errorlevel 1 (
+    echo %FAILURE% Compiling stage2.asm
+    echo %ERR%
+    type build\error.log
+    goto error
+)
+set /a COUNT+=1
+echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling stage2.asm
+
 set OBJS=
 for %%f in (src\asm\*.asm) do (
     set FILENAME=%%~nf
     if /I "!FILENAME!" neq "boot" (
         if /I "!FILENAME!" neq "gdt" (
-            nasm -f elf64 %%f -o build\asm_!FILENAME!.o 2>build\error.log
-            if errorlevel 1 (
-                echo %FAILURE% Compiling %%f
-                echo %ERR%
-                type build\error.log
-                goto error
+            if /I "!FILENAME!" neq "stage2" (
+                nasm -f elf64 %%f -o build\asm_!FILENAME!.o 2>build\error.log
+                if errorlevel 1 (
+                    echo %FAILURE% Compiling %%f
+                    echo %ERR%
+                    type build\error.log
+                    goto error
+                )
+                set /a COUNT+=1
+                echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling %%f
+                set OBJS=!OBJS! build\asm_!FILENAME!.o
             )
-            set /a COUNT+=1
-            echo %SUCCESS% [!COUNT!/%TOTAL%] Compiling %%f
-            set OBJS=!OBJS! build\asm_!FILENAME!.o
         )
     )
 )
@@ -115,11 +127,12 @@ if errorlevel 1 (
     goto error
 )
 
-for /f %%a in ('powershell -NoProfile -Command "((Get-Item 'build\boot.bin').Length + (Get-Item 'build\kernel.bin').Length)"') do set IMG_OFFSET=%%a
+for /f %%a in ('powershell -NoProfile -Command "((Get-Item 'build\boot.bin').Length + (Get-Item 'build\stage2.bin').Length + (Get-Item 'build\kernel.bin').Length)"') do set IMG_OFFSET=%%a
 set /a PAD_SIZE=1474560-!IMG_OFFSET!
+if !PAD_SIZE! lss 0 set PAD_SIZE=0
 fsutil file createnew build\pad.bin !PAD_SIZE! >nul 2>&1
 
-copy /b build\boot.bin + build\kernel.bin + build\pad.bin build\HarLin.img >nul
+copy /b build\boot.bin + build\stage2.bin + build\kernel.bin + build\pad.bin build\HarLin.img >nul
 if errorlevel 1 (
     echo %FAILURE% Creating disk image
     echo %ERR%
