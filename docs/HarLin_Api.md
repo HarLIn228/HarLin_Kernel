@@ -263,7 +263,7 @@ void Harlin_InitRtc(void);
 void Harlin_RtcRead(struct Harlin_RtcTime* out);
 u64  Harlin_RtcBootSeconds(void);
 
-## 17. 音频 API
+## 19. 音频 API
 
 ```c
 int  Harlin_AudioInit(void);
@@ -277,7 +277,7 @@ int  Harlin_AudioIsPlaying(void);
 `Harlin_AudioStop` 立即停止当前播放。
 `Harlin_AudioIsPlaying` 返回当前是否正在播放。
 
-## 18. Shell API
+## 20. Shell API
 
 ```c
 struct shell_command {
@@ -293,7 +293,7 @@ int  Harlin_ShellRegister(const struct shell_command* cmd);
 
 `Harlin_ShellRegister` 向 Shell 注册一个外部命令。注册后，用户在 Shell 中输入该命令名即可调用对应的处理函数。命令名不能重复，不能与内置命令冲突。
 
-## 19. 系统控制 API
+## 21. 系统控制 API
 
 ```c
 void Harlin_Boot(void);
@@ -302,7 +302,7 @@ void Harlin_Shutdown(void);
 
 `Harlin_Shutdown` 优先通过 ACPI PM1 控制寄存器触发 S5 软关机，失败后回退到 CLI + HLT。`Harlin_Boot` 在 initialization 尾声自动执行 ACPI 初始化。
 
-## 20. ACPI 电源管理 API
+## 22. ACPI 电源管理 API
 
 ```c
 int  acpi_init(void);
@@ -312,7 +312,7 @@ void acpi_reboot(void);
 
 `acpi_init` 扫描 BIOS 内存区域查找 RSDP，通过 RSDT 定位 FADT 并从 DSDT 解析 \_S5 关机参数。`acpi_power_off` 向 PM1a_CNT 寄存器写入 SLP_TYPa | SLP_EN 触发 S5 状态。`acpi_reboot` 优先使用 FADT RESET_REG（I/O 端口），失败则回退到键盘控制器复位。
 
-## 21. 系统调用接口
+## 23. 系统调用接口
 
 用户态程序通过软件中断 0x80 调用内核服务。系统调用号放在 RAX 中，参数遵循 System V AMD64 ABI。
 
@@ -352,11 +352,11 @@ void acpi_reboot(void);
 
 完整的系统调用表在内核中定义，并通过 `harlin_API.h` 向用户空间导出。
 
-## 22. 版本管理
+## 24. 版本管理
 
 API 版本跟随内核版本。主版本号仅在发生不兼容的 API 变更时增加，次版本号在向后兼容地增加功能时增加。
 
-## 23. 安全模型
+## 25. 安全模型
 
 - 内核代码和数据运行在 ring 0。
 - 用户进程运行在 ring 3。

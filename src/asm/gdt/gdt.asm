@@ -1,5 +1,5 @@
+[section .gdt_data]
 [BITS 16]
-
 gdt_start:
     dq 0
 gdt_code_32:
@@ -35,6 +35,9 @@ gdt_end:
 gdt_descriptor:
     dw gdt_end - gdt_start - 1
     dd gdt_start
+
+GDT_SIZE equ gdt_end - gdt_start
+GDT_BASE equ gdt_start
 
 CODE_SEG_32 equ gdt_code_32 - gdt_start
 DATA_SEG_32 equ gdt_data_32 - gdt_start

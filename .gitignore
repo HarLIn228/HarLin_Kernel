@@ -27,6 +27,7 @@ w+number-overflow
 *.swp
 *.swo
 
-# 编译中间文件
+# 编译中间文件与脚本
 *.o
 *.d
+*.py
