@@ -16,8 +16,9 @@
 #define ETHERTYPE_IP  0x0800
 #define ETHERTYPE_ARP 0x0806
 
-#define IP_PROTO_TCP  6
-#define IP_PROTO_UDP  17
+#define IP_PROTO_ICMP  1
+#define IP_PROTO_TCP   6
+#define IP_PROTO_UDP   17
 
 #define TCP_FLAG_FIN 0x01
 #define TCP_FLAG_SYN 0x02
@@ -337,13 +338,43 @@ static int rtl_poll_packet(unsigned char* buf, int max_len)
     return pkt_len - 4;
 }
 
+static unsigned int rtl_get_ticks(void)
+{
+    unsigned char lo;
+    unsigned char hi;
+    static int initialized = 0;
+    static unsigned int last_ticks = 0;
+    static unsigned int wrap = 0;
+    unsigned int raw;
+    outb(0x43, 0x00);
+    lo = inb(0x40);
+    hi = inb(0x40);
+    raw = ((unsigned int)hi << 8) | lo;
+    if (!initialized) {
+        initialized = 1;
+        last_ticks = raw;
+        return 0;
+    }
+    if (raw < last_ticks) {
+        wrap++;
+    }
+    last_ticks = raw;
+    return wrap * 0x10000U + (0x10000U - raw);
+}
+
+static unsigned int rtl_pit_to_ms(unsigned int ticks)
+{
+    return ticks / 1193U;
+}
+
 static int net_wait_packet(unsigned char* buf, int max_len)
 {
     int len;
     int waits;
-    for (waits = 100000; waits > 0; waits--) {
+    for (waits = 0; waits < 100000; waits++) {
         len = rtl_poll_packet(buf, max_len);
         if (len > 0) return len;
+        asm volatile ("pause" : : : "memory");
     }
     return 0;
 }
@@ -600,7 +631,6 @@ static int ip_send(unsigned char* dest_mac, unsigned char* dest_ip, unsigned cha
 
     if (pay_len > 2014) pay_len = 2014;
     total_len = 14 + 20 + pay_len;
-
     for (i = 0; i < 6; i++) pkt[i] = dest_mac[i];
     for (i = 0; i < 6; i++) pkt[i + 6] = local_mac[i];
     pkt[12] = 0x08;
@@ -626,6 +656,131 @@ static int ip_send(unsigned char* dest_mac, unsigned char* dest_ip, unsigned cha
 
     rtl_send_packet(pkt, total_len);
     return 1;
+}
+
+static int icmp_echo_checksum(unsigned char* buf, int len)
+{
+    unsigned int sum = 0;
+    int i;
+    if (len <= 0) return 0;
+    for (i = 0; i < len - 1; i += 2) {
+        sum += ((unsigned int)buf[i] << 8) | buf[i + 1];
+    }
+    if (len & 1) {
+        sum += (unsigned int)buf[len - 1] << 8;
+    }
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return (int)(~sum & 0xFFFF);
+}
+
+int icmp_ping(unsigned char* dest_ip, unsigned short ident, unsigned short seq,
+              int timeout, int payload_size, struct icmp_ping_result* out)
+{
+    unsigned char pkt[2048];
+    unsigned char rx[2048];
+    int total_len;
+    int i;
+    int tries;
+    int cksum;
+    unsigned char dest_mac[6];
+    int rtt_start;
+    int rtt_end;
+    int resolved;
+    unsigned int deadline_ticks;
+    unsigned int elapsed_ticks;
+
+    if (!dest_ip) return -1;
+    if (timeout <= 0) timeout = 1;
+    if (payload_size < 0) payload_size = 0;
+    if (payload_size > 1400) payload_size = 1400;
+    total_len = ICMP_HEADER_SIZE + payload_size;
+    if (total_len > (int)sizeof(pkt)) total_len = (int)sizeof(pkt);
+
+    for (i = 0; i < total_len; i++) pkt[i] = 0;
+    pkt[0] = ICMP_ECHO_REQUEST;
+    pkt[1] = 0x00;
+    pkt[2] = 0x00;
+    pkt[3] = 0x00;
+    pkt[4] = (unsigned char)(ident >> 8);
+    pkt[5] = (unsigned char)(ident & 0xFF);
+    pkt[6] = (unsigned char)(seq >> 8);
+    pkt[7] = (unsigned char)(seq & 0xFF);
+    for (i = 0; i < payload_size; i++) pkt[ICMP_HEADER_SIZE + i] = (unsigned char)(0x41 + (i & 0x3F));
+    cksum = icmp_echo_checksum(pkt, total_len);
+    pkt[2] = (unsigned char)(cksum >> 8);
+    pkt[3] = (unsigned char)(cksum & 0xFF);
+
+    rtt_start = rtl_get_ticks();
+
+    resolved = arp_resolve(dest_ip);
+    if (!resolved) {
+        unsigned char gw_ip[4] = {10, 0, 2, 2};
+        if (!arp_resolve(gw_ip)) {
+            if (out) {
+                out->received = 0;
+                out->rtt_ms = -1;
+                out->reply_id = 0;
+                out->reply_seq = 0;
+                out->reply_ttl = 0;
+                for (i = 0; i < 4; i++) out->reply_ip[i] = dest_ip[i];
+            }
+            return -1;
+        }
+        for (i = 0; i < 6; i++) dest_mac[i] = gateway_mac[i];
+    } else {
+        for (i = 0; i < 6; i++) dest_mac[i] = gateway_mac[i];
+    }
+
+    ip_send(dest_mac, dest_ip, IP_PROTO_ICMP, pkt, total_len);
+
+    deadline_ticks = rtl_get_ticks() + (unsigned int)timeout * 1193U;
+    while (1) {
+        int len = net_wait_packet(rx, sizeof(rx));
+        if (len > 0) {
+            int ip_hdr_len;
+            int ip_total;
+            int icmp_off;
+            int ip_off;
+            int src_match;
+            if (!(rx[12] == 0x08 && rx[13] == 0x00)) continue;
+            if (rx[23] != IP_PROTO_ICMP) continue;
+            if (len < 14 + 20 + ICMP_HEADER_SIZE) continue;
+            ip_off = 14;
+            ip_hdr_len = (rx[ip_off] & 0x0F) * 4;
+            if (ip_hdr_len < 20) continue;
+            ip_total = ((int)rx[ip_off + 2] << 8) | rx[ip_off + 3];
+            if (ip_total < ip_hdr_len + ICMP_HEADER_SIZE) continue;
+            icmp_off = ip_off + ip_hdr_len;
+            if (rx[icmp_off] != ICMP_ECHO_REPLY) continue;
+            src_match = 1;
+            for (i = 0; i < 4; i++) {
+                if (rx[ip_off + 12 + i] != dest_ip[i]) { src_match = 0; break; }
+            }
+            if (!src_match) continue;
+            rtt_end = rtl_get_ticks();
+            if (out) {
+                out->received = 1;
+                out->rtt_ms = (int)rtl_pit_to_ms((unsigned int)(rtt_end - rtt_start));
+                out->reply_id  = ((unsigned short)rx[icmp_off + 4] << 8) | rx[icmp_off + 5];
+                out->reply_seq = ((unsigned short)rx[icmp_off + 6] << 8) | rx[icmp_off + 7];
+                out->reply_ttl = rx[ip_off + 8];
+                for (i = 0; i < 4; i++) out->reply_ip[i] = rx[ip_off + 12 + i];
+            }
+            return 0;
+        }
+        if (rtl_get_ticks() >= deadline_ticks) break;
+    }
+    if (out) {
+        out->received = 0;
+        out->rtt_ms = -1;
+        out->reply_id = 0;
+        out->reply_seq = 0;
+        out->reply_ttl = 0;
+        for (i = 0; i < 4; i++) out->reply_ip[i] = dest_ip[i];
+    }
+    elapsed_ticks = rtl_get_ticks() - (unsigned int)rtt_start;
+    (void)elapsed_ticks;
+    return -2;
 }
 
 static int tcp_compute_checksum(unsigned char* src_ip, unsigned char* dst_ip, unsigned char* tcp_seg, int tcp_len)

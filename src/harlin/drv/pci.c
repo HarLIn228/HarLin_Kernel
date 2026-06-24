@@ -6,26 +6,102 @@
 static struct pci_device pci_devices[PCI_MAX_DEVICES];
 static int pci_device_count_value = 0;
 
+static int  g_pci_ecam_available = 0;
+static u64  g_pci_ecam_base       = 0;
+static u16  g_pci_ecam_bus_start  = 0;
+static u16  g_pci_ecam_bus_end    = 0;
+
+static int pci_bus_in_ecam(u8 bus)
+{
+    if (!g_pci_ecam_available) return 0;
+    return ((u16)bus >= g_pci_ecam_bus_start) && ((u16)bus <= g_pci_ecam_bus_end);
+}
+
+static u64 pci_ecam_addr(u8 bus, u8 dev, u8 func, u16 off)
+{
+    u64 b = (u64)bus - (u64)g_pci_ecam_bus_start;
+    return g_pci_ecam_base
+         | (b << 20)
+         | ((u64)dev << 15)
+         | ((u64)func << 12)
+         | (off & 0xFFF);
+}
+
+u32 pci_read_ext(u8 bus, u8 dev, u8 func, u16 off)
+{
+    u64 addr;
+    volatile u32* p;
+    if (!pci_bus_in_ecam(bus)) return 0xFFFFFFFFU;
+    if (off >= PCI_ECAM_CFG_SIZE) return 0xFFFFFFFFU;
+    addr = pci_ecam_addr(bus, dev, func, off);
+    p = (volatile u32*)addr;
+    return *p;
+}
+
+void pci_write_ext(u8 bus, u8 dev, u8 func, u16 off, u32 val)
+{
+    u64 addr;
+    volatile u32* p;
+    if (!pci_bus_in_ecam(bus)) return;
+    if (off >= PCI_ECAM_CFG_SIZE) return;
+    addr = pci_ecam_addr(bus, dev, func, off);
+    p = (volatile u32*)addr;
+    *p = val;
+}
+
 u32 pci_read(u8 bus, u8 dev, u8 func, u8 off)
 {
-    u32 addr = 0x80000000U
-             | ((u32)bus << 16)
-             | ((u32)dev << 11)
-             | ((u32)func << 8)
-             | (off & 0xFC);
+    u32 addr;
+    volatile u32* p;
+    if (pci_bus_in_ecam(bus)) {
+        return pci_read_ext(bus, dev, func, (u16)off);
+    }
+    addr = 0x80000000U
+         | ((u32)bus << 16)
+         | ((u32)dev << 11)
+         | ((u32)func << 8)
+         | (off & 0xFC);
     outl(PCI_ADDR_PORT, addr);
-    return inl(PCI_DATA_PORT);
+    p = (volatile u32*)PCI_DATA_PORT;
+    return *p;
 }
 
 void pci_write(u8 bus, u8 dev, u8 func, u8 off, u32 val)
 {
-    u32 addr = 0x80000000U
-             | ((u32)bus << 16)
-             | ((u32)dev << 11)
-             | ((u32)func << 8)
-             | (off & 0xFC);
+    u32 addr;
+    volatile u32* p;
+    if (pci_bus_in_ecam(bus)) {
+        pci_write_ext(bus, dev, func, (u16)off, val);
+        return;
+    }
+    addr = 0x80000000U
+         | ((u32)bus << 16)
+         | ((u32)dev << 11)
+         | ((u32)func << 8)
+         | (off & 0xFC);
     outl(PCI_ADDR_PORT, addr);
-    outl(PCI_DATA_PORT, val);
+    p = (volatile u32*)PCI_DATA_PORT;
+    *p = val;
+}
+
+int pci_ecam_available(void)
+{
+    return g_pci_ecam_available;
+}
+
+u64 pci_ecam_base(void)
+{
+    return g_pci_ecam_base;
+}
+
+u16 pci_ecam_bus_start(void)
+{
+    return g_pci_ecam_bus_start;
+}
+
+u16 pci_ecam_bus_end(void)
+{
+    return g_pci_ecam_bus_end;
 }
 
 static void pci_scan_device(u8 bus, u8 dev, u8 func, u8 header_type)
@@ -139,10 +215,27 @@ static void pci_scan_bus(u8 bus)
 
 int pci_init(void)
 {
+    return pci_init_with_ecam(0, 0, 0);
+}
+
+int pci_init_with_ecam(u64 ecam_base, u16 bus_start, u16 bus_end)
+{
     u32 reg3;
     u8 header_type;
     u16 reg0_check;
     int i;
+
+    if (ecam_base != 0 && bus_end >= bus_start) {
+        g_pci_ecam_available = 1;
+        g_pci_ecam_base      = ecam_base;
+        g_pci_ecam_bus_start = bus_start;
+        g_pci_ecam_bus_end   = bus_end;
+    } else {
+        g_pci_ecam_available = 0;
+        g_pci_ecam_base      = 0;
+        g_pci_ecam_bus_start = 0;
+        g_pci_ecam_bus_end   = 0;
+    }
 
     pci_device_count_value = 0;
     for (i = 0; i < PCI_MAX_DEVICES; i++) {

@@ -384,6 +384,25 @@ int  elf_symbol_name(const struct elf_info* info, const void* data, uint64_t siz
                      const struct elf_section* symtab, const struct elf_section* strtab,
                      int sym_index, char* out_name, int out_max);
 
+struct elf_exec_info {
+    uint64_t entry;
+    uint64_t phdr_vaddr;
+    uint64_t phdr_memsz;
+    uint64_t load_bias;
+    uint64_t lowest_vaddr;
+    uint64_t highest_vaddr;
+    int      is_64;
+    int      loaded_segments;
+    int      total_segments;
+};
+
+int  elf_load_exec(const void* data, uint64_t size, struct elf_exec_info* out,
+                   int (*alloc_user_page)(unsigned long long vaddr, unsigned long long src_phys, unsigned long long filesz, unsigned long long memsz, void* ctx),
+                   void* ctx,
+                   const void* data_ptr, uint64_t data_size);
+int  elf_load_exec_simple(const void* data, uint64_t size, struct elf_exec_info* out);
+int  Harlin_ElfLoadExec(const void* data, uint64_t size, struct elf_exec_info* out);
+
 #define Harlin_ElfCheckMagic          elf_check_magic
 #define Harlin_ElfParseHeader         elf_parse_header
 #define Harlin_ElfLoadSegment         elf_load_segment

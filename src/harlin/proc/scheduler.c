@@ -9,6 +9,7 @@
 #include "ipc.h"
 #include "percpu.h"
 #include "smp.h"
+#include "elf.h"
 
 #define USER_CS 0x2B
 #define USER_SS 0x33
@@ -266,6 +267,197 @@ int process_create(u64 rip, u64 rsp)
     spinlock_release(&scheduler_lock);
     return i;
 }
+
+#define ELF_USER_LOAD_BASE 0x400000ULL
+#define ELF_USER_STACK_TOP 0x7FFFF000ULL
+#define ELF_USER_STACK_PAGES 4
+#define ELF_USER_STACK_SIZE (ELF_USER_STACK_PAGES * 4096)
+
+struct elf_load_ctx {
+    u64 saved_pml4;
+    int  slot;
+    int  mapped_pages;
+    int  failed;
+    u64  base_va;
+    u64  last_vaddr;
+    u64  last_src;
+    u64  last_filesz;
+};
+
+static int elf_alloc_user_page_cb(u64 vaddr, u64 src_phys, u64 filesz, u64 memsz, void* ctx_p)
+{
+    struct elf_load_ctx* ctx = (struct elf_load_ctx*)ctx_p;
+    u64 phys;
+    u64 page_off = vaddr & 0xFFF;
+    u64 chunk = 0x1000 - page_off;
+    if (chunk > filesz) chunk = filesz;
+
+    phys = pmm_alloc();
+    if (!phys) {
+        ctx->failed = 1;
+        return -1;
+    }
+    {
+        volatile u64* p = (volatile u64*)phys;
+        int i;
+        for (i = 0; i < 512; i++) p[i] = 0;
+    }
+    if (vmm_map(vaddr, phys, VMM_PRESENT | VMM_WRITABLE | VMM_USER) != 0) {
+        pmm_free(phys);
+        ctx->failed = 1;
+        return -1;
+    }
+    if (src_phys) {
+        Harlin_CopyToUser(vaddr, (const void*)src_phys, (u32)chunk);
+    }
+    (void)memsz;
+    ctx->mapped_pages++;
+    if (ctx->slot >= 0 && ctx->slot < MAX_PROCESSES) {
+        if (processes[ctx->slot].page_count < 64) {
+            processes[ctx->slot].user_vaddrs[processes[ctx->slot].page_count] = vaddr;
+            processes[ctx->slot].user_pages[processes[ctx->slot].page_count++] = phys;
+        }
+    }
+    ctx->last_vaddr = vaddr;
+    ctx->last_src = src_phys;
+    ctx->last_filesz = filesz;
+    return 0;
+}
+
+int process_create_elf(const void* elf_data, u64 elf_size)
+{
+    struct elf_exec_info info;
+    int slot;
+    int j;
+    int allocated_stack_pages = 0;
+    u64 stack_phys[ELF_USER_STACK_PAGES];
+    u64 stack_base;
+    u64 stack_top;
+    u64 saved_pml4 = 0;
+    u64 cloned_pml4 = 0;
+    int map_ok = 1;
+    int i;
+    struct elf_load_ctx ctx;
+
+    if (!elf_data || elf_size < 16) return -1;
+    if (elf_check_magic(elf_data, elf_size) != 0) return -1;
+
+    Harlin_Fill((void*)&info, 0, sizeof(info));
+    if (Harlin_ElfLoadExec(elf_data, elf_size, &info) != 0) return -1;
+    if (info.entry < ELF_USER_LOAD_BASE) return -1;
+
+    spinlock_acquire(&scheduler_lock);
+    for (slot = 0; slot < MAX_PROCESSES; slot++) {
+        if (processes[slot].state == PROC_STATE_NONE)
+            break;
+    }
+    if (slot >= MAX_PROCESSES) {
+        spinlock_release(&scheduler_lock);
+        return -1;
+    }
+
+    for (j = 0; j < ELF_USER_STACK_PAGES; j++) {
+        stack_phys[j] = pmm_alloc();
+        if (!stack_phys[j]) break;
+        allocated_stack_pages = j + 1;
+    }
+    if (allocated_stack_pages != ELF_USER_STACK_PAGES) {
+        for (j = 0; j < allocated_stack_pages; j++)
+            pmm_free(stack_phys[j]);
+        spinlock_release(&scheduler_lock);
+        return -1;
+    }
+
+    stack_base = KERNEL_STACK_BASE + (u64)slot * KERNEL_STACK_SIZE;
+    stack_top = stack_base + KERNEL_STACK_SIZE;
+
+    saved_pml4 = vmm_current_pml4();
+    cloned_pml4 = vmm_clone_kernel_pml4();
+    if (cloned_pml4) {
+        vmm_switch(cloned_pml4);
+        for (j = 0; j < 4; j++) {
+            if (vmm_map(stack_base + (u64)j * 4096, stack_phys[j], VMM_PRESENT | VMM_WRITABLE) != 0) {
+                map_ok = 0;
+                break;
+            }
+        }
+        if (map_ok) {
+            u64 verify_base = vmm_get_phys(stack_base);
+            if (verify_base != stack_phys[0])
+                map_ok = 0;
+        }
+    } else {
+        map_ok = 0;
+    }
+    if (!map_ok) {
+        if (cloned_pml4) vmm_switch(saved_pml4);
+        for (j = 0; j < 4; j++) pmm_free(stack_phys[j]);
+        spinlock_release(&scheduler_lock);
+        return -1;
+    }
+
+    Harlin_Fill((void*)&ctx, 0, sizeof(ctx));
+    ctx.slot = slot;
+    ctx.saved_pml4 = saved_pml4;
+    ctx.failed = 0;
+    ctx.mapped_pages = 0;
+    processes[slot].state = PROC_STATE_BLOCKED;
+
+    spinlock_release(&scheduler_lock);
+
+    int load_rc = elf_load_exec(elf_data, elf_size, &info, elf_alloc_user_page_cb, &ctx, 0, 0);
+
+    spinlock_acquire(&scheduler_lock);
+    if (load_rc != 0 || processes[slot].state == PROC_STATE_NONE) {
+        vmm_switch(saved_pml4);
+        for (j = 0; j < 4; j++) pmm_free(stack_phys[j]);
+        processes[slot].state = PROC_STATE_NONE;
+        spinlock_release(&scheduler_lock);
+        return -1;
+    }
+
+    {
+        u64 user_stack_base = ELF_USER_STACK_TOP - ELF_USER_STACK_SIZE;
+        for (i = 0; i < ELF_USER_STACK_PAGES; i++) {
+            u64 phys = pmm_alloc();
+            if (!phys) break;
+            Harlin_Fill((void*)phys, 0, 4096);
+            if (vmm_map(user_stack_base + (u64)i * 4096, phys, VMM_PRESENT | VMM_WRITABLE | VMM_USER) != 0) {
+                pmm_free(phys);
+                break;
+            }
+            if (processes[slot].page_count < 64) {
+                processes[slot].user_vaddrs[processes[slot].page_count] = user_stack_base + (u64)i * 4096;
+                processes[slot].user_pages[processes[slot].page_count++] = phys;
+            }
+        }
+    }
+
+    vmm_switch(saved_pml4);
+
+    processes[slot].rip = info.entry;
+    processes[slot].rsp = ELF_USER_STACK_TOP;
+    processes[slot].rdi = 0;
+    processes[slot].rflags = 0x202;
+    processes[slot].state = PROC_STATE_READY;
+    processes[slot].first_run = 1;
+    if (processes[slot].page_count > 64) processes[slot].page_count = 64;
+    processes[slot].next_alloc_virt = ELF_USER_LOAD_BASE + 0x100000;
+    processes[slot].cpu = -1;
+    processes[slot].priority = 1;
+    processes[slot].time_slice = DEFAULT_TIME_SLICE;
+    processes[slot].sleep_until = 0;
+    processes[slot].pml4_phys = cloned_pml4;
+    processes[slot].kernel_stack_top = stack_top;
+    processes[slot].kernel_stack_base = stack_base;
+    processes[slot].kernel_stack_pages_count = 4;
+    for (j = 0; j < 4; j++)
+        processes[slot].kernel_stack_pages_phys[j] = stack_phys[j];
+    processes[slot].handle_count = 0;
+    spinlock_release(&scheduler_lock);
+    return slot;
+}
+
 
 void process_set_kernel_stack(int pid, u64 stack_top)
 {

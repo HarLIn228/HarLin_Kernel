@@ -11,6 +11,7 @@
 #include "kmalloc.h"
 #include "interrupt.h"
 #include "spinlock.h"
+#include "elf.h"
 
 #define USER_ADDR_START 0x400000
 #define USER_ADDR_END   0x800000
@@ -289,8 +290,45 @@ static unsigned long sys_close(struct syscall_regs* r)
 
 static unsigned long sys_exec(struct syscall_regs* r)
 {
-    (void)r;
-    return (unsigned long)-1;
+    char kname[256];
+    struct Harlin_File file;
+    u8* kbuf = 0;
+    u32 fsize;
+    int pid;
+
+    if (!r->rdi || !user_ptr_valid(r->rdi, 1))
+        return (unsigned long)-1;
+    if (strncpy_from_user(kname, r->rdi, sizeof(kname)) != 0)
+        return (unsigned long)-1;
+    if (Harlin_Open(kname, &file) != HARLIN_FS_OK)
+        return (unsigned long)-1;
+    fsize = Harlin_Size(&file);
+    if (fsize == 0 || fsize > (16 * 1024 * 1024)) {
+        Harlin_Close(&file);
+        return (unsigned long)-1;
+    }
+    kbuf = (u8*)kmalloc(fsize);
+    if (!kbuf) {
+        Harlin_Close(&file);
+        return (unsigned long)-1;
+    }
+    {
+        int n = Harlin_Read(&file, kbuf, fsize);
+        Harlin_Close(&file);
+        if (n <= 0) {
+            kfree(kbuf);
+            return (unsigned long)-1;
+        }
+        fsize = (u32)n;
+    }
+    if (Harlin_ElfCheckMagic(kbuf, fsize) != 0) {
+        kfree(kbuf);
+        return (unsigned long)-1;
+    }
+    pid = process_create_elf(kbuf, fsize);
+    kfree(kbuf);
+    if (pid < 0) return (unsigned long)-1;
+    return (unsigned long)pid;
 }
 
 static unsigned long sys_yield(struct syscall_regs* r)

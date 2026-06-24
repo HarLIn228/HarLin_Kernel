@@ -41,7 +41,7 @@ load_kernel:
 
 kernel_src: equ 0x9D50
 
-%include "src/asm/gdt/gdt.asm"
+%include "src/asm/core/gdt.asm"
 
 [BITS 32]
 protected_mode:

@@ -38,6 +38,22 @@ int tcp_send(int conn_id, unsigned char* data, int data_len);
 int tcp_recv(int conn_id, unsigned char* buf, int max_len, int timeout);
 void tcp_close_conn(int conn_id);
 
+#define ICMP_ECHO_REQUEST 8
+#define ICMP_ECHO_REPLY   0
+#define ICMP_HEADER_SIZE  8
+
+struct icmp_ping_result {
+    int       received;
+    int       rtt_ms;
+    u16       reply_id;
+    u16       reply_seq;
+    u8        reply_ttl;
+    u8        reply_ip[4];
+};
+
+int icmp_ping(unsigned char* dest_ip, u16 ident, u16 seq, int timeout, int payload_size,
+              struct icmp_ping_result* out);
+
 #define Harlin_NetInit                network_init
 #define Harlin_HttpGetRaw             network_http_get
 #define Harlin_HttpsGetRaw            network_https_get
@@ -47,5 +63,6 @@ void tcp_close_conn(int conn_id);
 #define Harlin_TcpSend                tcp_send
 #define Harlin_TcpRecv                tcp_recv
 #define Harlin_TcpCloseConn           tcp_close_conn
+#define Harlin_IcmpPing               icmp_ping
 
 #endif

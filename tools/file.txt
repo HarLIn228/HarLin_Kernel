@@ -1,0 +1,5 @@
+total: 84 files, 14323 lines
+
+  .asm: 12 files, 694 lines
+  .c: 36 files, 11645 lines
+  .h: 35 files, 1934 lines

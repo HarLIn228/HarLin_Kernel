@@ -1,6 +1,98 @@
 # HarLin Kernel version.md
 
-## v1.6.2(最新)
+## v1.7.3
+
+**新增**
+- 构建：GUI 编译工具（`Build.exe`），含参数控制器（12 个编译选项）和工具控制器（6 个工具路径配置，支持 Path/本地路径模式）
+- 工具控制器：支持组装器、C 编译器、链接器、objcopy、truncate、xorriso 路径配置；Path 模式自动用 `where.exe` 检测，找不到则切回本地路径
+- 参数控制器：调试信息、优化等级、LTO、GC 节区、错误信息显示、ISO/磁盘映像生成等开关
+- 网络：新增 `icmp_ping(dest_ip, ident, seq, timeout, payload_size, out)` 接口（`src/head/net/network.h` + `src/harlin/net/network.c`），按 RFC 792 构造 ICMPv4 echo request（type=8）并通过 `ip_send(proto=IP_PROTO_ICMP)` 发送
+- 网络：新增 `struct icmp_ping_result`（`received / rtt_ms / reply_id / reply_seq / reply_ttl / reply_ip`），回复后回填耗时与 TTL 等信息
+- 网络：新增本地 `rtl_get_ticks()`，读取 PIT 通道 0 计数器，转换为单调递增 tick（1.193 MHz），作为 RTT 计量
+- 网络：新增 `icmp_echo_checksum()`，按标准 ones-complement 算法对 ICMP 头+payload 计算校验和
+- 网络：常量 `IP_PROTO_ICMP = 1`、`ICMP_ECHO_REQUEST = 8`、`ICMP_ECHO_REPLY = 0`、`ICMP_HEADER_SIZE = 8`
+- API：新增 `Harlin_IcmpPing` 公开宏别名
+
+**变更**
+- 目录：`src/asm/` 子目录合并，audio/speaker.asm → drv/speaker.asm；gdt/intr/smp/sync/util 合并为 core/
+- 目录：`src/harlin/` 移除 acpi/、sec/、shell/ 顶层目录，boot/ 新增（cr4_features、feature_probe）；shell/ → proc/shell、elf/ → proc/elf
+- 目录：`docs/` 新增默认硬件指南、第三方驱动接入教程
+- 构建：构建脚本由 `build.bat` 迁移为 Python GUI 程序 `Build.py`，支持可视化参数配置
+- ping 走现有 `arp_resolve` + `ip_send` 路径，仅在 `gateway_resolved` 之后再行包发送；目标不可达返回 `-1`，超时返回 `-2`
+- 接收侧单次会话轮询 `net_wait_packet`，按 ETHERTYPE_IP + IP_PROTO_ICMP + ICMP_ECHO_REPLY + 源 IP 严格匹配，过滤其他 ICMP 流量
+- 网络：`net_wait_packet` 忙等循环插入 `pause` 指令，降低自旋功耗
+- 进程：`process_create_elf` 解除 ELF 加载期间对 `scheduler_lock` 的长持锁，slot 预占为 `PROC_STATE_BLOCKED` 后释放锁调 `elf_load_exec`，完成后再获取锁校验 slot 仍有效再置 `PROC_STATE_READY`
+- 进程：移除 `processes[slot].page_count = ctx.mapped_pages + ELF_USER_STACK_PAGES` 的二次覆盖，改为复用 `elf_alloc_user_page_cb` 与用户栈循环累加的 `page_count`，仅做 `> 64` 上限钳制
+
+**修复**
+- 网络：修复 `net_wait_packet` 100000 次空轮询无 `pause`，降低自旋耗电
+
+---
+
+## v1.7.2
+
+**新增**
+- PCI：新增 `pci_init_with_ecam(ecam_base, bus_start, bus_end)` 入口（`src/head/drv/pci.h` + `src/harlin/drv/pci.c`），把 ECAM 基址和总线范围挂到 PCI 子系统
+- PCI：新增 `pci_ecam_available` / `pci_ecam_base` / `pci_ecam_bus_start` / `pci_ecam_bus_end` 查询接口
+- PCI：新增 `pci_read_ext(bus, dev, func, off)` / `pci_write_ext(...)`，按 PCI Express 4 KB/设备 扩展配置空间访问规范实现 MMIO 读写（地址 = base + bus*1MB + dev*32KB + func*4KB + off）
+- PCI：原 `pci_read` / `pci_write` 自动检测目标总线是否在 ECAM 范围，命中走 MMIO、不命中回退到 I/O 端口 `0xCF8/0xCFC`
+- API：新增 `Harlin_PciInitWithEcam` / `Harlin_PciEcamAvailable` / `Harlin_PciEcamBase` / `Harlin_PciEcamBusStart` / `Harlin_PciEcamBusEnd` / `Harlin_PciReadExt` / `Harlin_PciWriteExt` 公开宏别名
+
+**变更**
+- `pci_init_with_ecam(0, 0, 0)` 行为等价于旧 `pci_init`，不会启用 ECAM
+- 旧 I/O 路径在 ECAM 关闭时仍为唯一访问手段，已是生产分支行为
+- ECAM 地址空间按调用方传入的 `ecam_base` 直接解引用，未做虚拟映射；调用方须保证 ECAM 物理页已在分页中建立
+
+**修复**
+- 网络：修复 `icmp_ping` 在 `arp_resolve` 之前计算 RTT，导致 RTT 包含 ARP 解析等待时间的错误
+- 网络：修复 `icmp_ping` 毫秒换算用 `/ 1000` 偏差过大（PIT 1.193 MHz），改用 `rtl_pit_to_ms(ticks) = ticks / 1193`
+- 网络：修复 `rtl_get_ticks` 首次 `raw > last_ticks` 在初始化阶段误增 `wrap` 计数；新增 `initialized` 标志，首轮直接返回 0
+- 网络：修复 `icmp_ping` 超时按 `tries` 计数硬凑 `timeout * 1000` 实际等待时间远超预期，改为 PIT 计数 `deadline_ticks = now + timeout * 1193`
+- 网络：清理 `icmp_ping` 中 `elapsed` 死代码
+
+---
+
+## v1.7.1
+
+**新增**
+- PMM：新增 `pmm_init_from_e820(top_usable_addr)` 入口（`src/head/mem/pmm.h` + `src/harlin/mem/pmm.c`），按 `top_usable_addr - PMM_BASE_ADDR` 推算 `total_pages`
+- PMM：新增 `pmm_total_pages` / `pmm_total_bytes` / `pmm_top_addr` 状态查询
+- PMM：`PMM_MAX_PAGES` 上限设为 `0x100000`（4 GiB / 4 KiB）；下界 `PMM_TOTAL_PAGES_MIN = 32000` 保持旧行为兼容
+- PMM：bitmap 范围 `[PMM_BITMAP_ADDR, PMM_BITMAP_ADDR + bitmap_bytes)`，布局校验保证不撞 `PMM_BASE_ADDR`
+- API：新增 `Harlin_PmmInitFromE820` / `Harlin_PmmTotalPages` / `Harlin_PmmTotalBytes` / `Harlin_PmmTopAddr` 公开宏别名
+
+**变更**
+- 移除旧版 `PMM_TOTAL_PAGES` 宏对所有分配函数的硬编码依赖，所有路径改用 `g_pmm_total_pages` 全局
+- 旧 `pmm_init` 改为 `pmm_init_from_e820(PMM_BASE_ADDR + PMM_TOTAL_PAGES_MIN * PAGE_SIZE)` 包装，行为向后兼容
+
+**修复**
+- ELF：修复 `elf.c` 加载 PT_LOAD 段时未校验 `p_offset` / `p_filesz` 是否在 `size` 范围内，新增 `if (off_in_file > size || segs[i].p_filesz > size - off_in_file) return -1` 越界检查
+- 进程：修复 `process_create_elf` 在 `elf_load_exec` 期间使用 `Harlin_Copy` 在不同 PML4 页表间直接拷贝导致崩溃，改为 `Harlin_CopyToUser` 通过用户虚拟地址映射安全传输数据
+
+---
+
+## v1.7 - 现代更新
+
+**目标**：在已经完成的 ELF 解析器基础上补全进程加载链路，使内核可以真正加载并调度外部 ELF 用户程序。
+
+**新增**
+- ELF：新增 `elf_load_exec` / `elf_load_exec_simple` / `Harlin_ElfLoadExec` 接口（`src/head/elf/elf.h` + `src/harlin/elf/elf.c`），回调式完成 PT_LOAD 段解析、地址范围统计、入口点暴露
+- ELF：新增 `struct elf_exec_info` 结构体（`entry / phdr_vaddr / phdr_memsz / load_bias / lowest_vaddr / highest_vaddr / is_64 / loaded_segments / total_segments`），为进程加载器提供完整加载元信息
+- 进程管理：新增 `process_create_elf(elf_data, elf_size)` 入口（`src/head/proc/scheduler.h` + `src/harlin/proc/scheduler.c`），通过 `vmm_clone_kernel_pml4` 复制内核 PML4 副本、切换后映射 PT_LOAD 段、分配 4 页内核栈 + 4 页用户栈、记录到 `user_vaddrs` / `user_pages` 跟踪表、回切 PML4 后将进程置为 `PROC_STATE_READY`
+- 进程管理：进程描述符新增 `pml4_phys` / `kernel_stack_top` / `kernel_stack_base` / `kernel_stack_pages_count` / `kernel_stack_pages_phys[4]` / `rflags` 字段
+- 系统调用：重建 `sys_exec`（`src/harlin/syscall/syscall.c`），流程为：用户路径名拷贝 → `Harlin_Open` + `Harlin_Size` + `Harlin_Read` 读入 kmalloc 缓冲区 → `Harlin_ElfCheckMagic` 校验 → `process_create_elf` 加载 → 返回新建 pid
+
+**变更**
+- 仅支持 x86_64 ET_EXEC / ET_DYN，不支持静态 PIE 之外的 32 位 ELF（`info.entry < ELF_USER_LOAD_BASE` 直接拒绝）
+- 用户地址空间范围 `0x400000 - 0x800000`，用户栈顶固定 `0x7FFFF000`
+- 单个 ELF 文件最大 16 MiB，超出直接拒绝
+- ELF 头不在已加载 PT_LOAD 段中时，回调 `src_phys == 0`，加载器自行 `pmm_alloc` 并清零
+- ELF：回调签名改为显式 `unsigned long long` 形参，避免与项目 `u64` 在不同平台下长度不一致导致的隐式类型不匹配
+- ELF：`elf.h` 增加 `Harlin_ElfLoadExec` / `Harlin_ElfCheckMagic` 公开宏别名
+
+---
+
+## v1.6.2
 
 **新增**
 - 驱动层：新增 `drv_loader` 驱动注册/加载框架（`src/head/drv/drv_loader.h` + `src/harlin/drv/drv_loader.c`），支持 32 个子系统分类（对齐主流：storage/net/usb/display/audio/input/timer/power/bus/serio/tty/rtc/watchdog/thermal/gpio/crypto/blk/hid/fs/mfd/clk/pwm/net_wireless/sound/acpi/iio/platform/scsi/mtd/virtio/drm）、优先级、`probe/init/remove/suspend/resume` 标准入口与 `provider` 探测；缺位驱动自动回退默认实现

@@ -41,6 +41,7 @@ struct process {
 
 void scheduler_init(void);
 int  process_create(u64 rip, u64 rsp);
+int  process_create_elf(const void* elf_data, u64 elf_size);
 struct process* process_get(int pid);
 void process_set_current(int pid);
 void schedule(void);
