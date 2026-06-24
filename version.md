@@ -1,5 +1,35 @@
 # HarLin Kernel version.md
 
+## v1.7.4
+
+**新增**
+- 引导：UEFI 引导应用 `loader.efi`（`src/uefi/efi_types.h` + `src/uefi/efi_main.c`），在 PE32+ 入口 `efi_main` 中通过 `EFI_BOOT_SERVICES` 定位 `EFI_SIMPLE_FILE_SYSTEM_PROTOCOL` 与 `EFI_LOADED_IMAGE_PROTOCOL`，读取启动盘根目录下的 `kernel.bin` 并跳转到内核入口
+- 引导：UEFI 阶段获取内存映射（`EFI_BOOT_SERVICES.GetMemoryMap`），退出引导服务（`ExitBootServices`）后再交接给内核，并把内存描述符基址/大小写入 `EFI_BOOT_INFO` 由内核侧消费
+- 引导：UEFI 阶段获取 `ACPI 2.0` 表 RSDP 并写入 `EFI_BOOT_INFO.acpi_rsdp`，供内核 ACPI 解析复用
+- 中断：新增 `isr14_stub` 缺页异常处理桩（`src/asm/core/interrupt.asm`），保存通用寄存器、读取 CR2、通过 `page_fault_handler(fault_addr, error_code)` 分发
+- 内存：新增 `page_fault_handler` / `page_fault_demand_mapping_install` / `page_fault_cow_resolve`（`src/head/mem/page_fault.h` + `src/harlin/mem/page_fault.c`），按需分页与 COW 写时复制实现
+- 内存：按需分页在 `!PF_PRESENT` 首次访问未映射页时 `pmm_alloc` + 清零 + `vmm_map` + `invlpg`
+- 内存：COW 在 `PF_PRESENT & PF_WRITE` 命中只读共享页时分配新页、复制 4 KiB 内容、`vmm_unmap` + `vmm_map` 可写页 + `invlpg`
+- 存储：AHCI 驱动替换原 ATA 驱动（`src/harlin/drv/ahci.c`），按 HBA 端口映射、命令列表/FIS 结构体构建、PRDT 物理区域描述符构造、命令提交与状态轮询完整流程
+- 存储：AHCI 内部使用本地 `ahci_memset` / `ahci_memcpy`（freestanding 环境下标准库不可用），并通过宏替换 `memset` / `memcpy` 避免链接缺失
+- 构建：构建脚本新增 CLI 模式 `python tools\Build.py -cli`（或 `build.exe -cli`），直接以命令行方式运行完整构建并输出到控制台，成功退出 0、失败退出 1
+
+**变更**
+- IDT：`isr_stubs[14]` 由通用 `isr14` 切到缺页专用 `isr14_stub`，沿用 `GDT_KERNEL_CODE` 0x8E 中断门
+- Build：`run_command` 同时支持 list 形参（避免 shell 重解析）与 str 形参；xorriso 调用改为 list 模式，并以 `cwd=iso_root` + 相对 `boot.img` 路径解决 mkisofs 路径解析
+- Build：`root_dir` 判定从 `os.path.dirname(...)` 改为 `os.path.dirname(os.path.dirname(...))`，dev 模式（`tools/Build.py`）与 frozen 模式（`tools/build.exe`）都能正确指向项目根
+- 启动：ISO 镜像内同时含 BIOS 阶段（`boot.img`）与 UEFI 阶段（`EFI/BOOT/BOOTX64.EFI`），并通过 `-eltorito-alt-boot` 走 UEFI eltorito 入口
+- 内核：启动魔数检测加入 UEFI 引导魔数（`EFI_BOOT_INFO` 标记），与 BIOS 启动路径共享同一 `kernel_main` 入口
+
+**修复**
+- 中断：修复 `isr14_stub` 在 `iretq` 前 `add rsp, 16` 多跳一格导致返回用户态崩溃，改为 `add rsp, 8` 仅跳过 CPU 压入的 error_code
+- UEFI：修复 `efi_types.h` 缺少 `UINTN` 类型导致 `LocateProtocol` 编译失败，新增 `typedef unsigned long UINTN`
+- UEFI：修复 `EFI_BOOT_SERVICES` 结构体字段偏移计算错误导致 `LocateProtocol` 等调用走飞指针，改为按函数指针偏移直接定位调用
+- 构建：修复 `Build.exe` 用 `--noconsole` 打包导致编译信息无法在控制台显示，`log()` 直接 `print` 到 stdout；后续 `--onefile --console` 重新打包后 CLI 模式可见
+- 构建：修复 `xorriso` shell 模式下 `-eltorito-alt-boot` 被解析为 ISO 路径导致 abort，改用 list 形参 + `cwd=iso_root` 显式工作目录
+
+---
+
 ## v1.7.3
 
 **新增**
@@ -72,8 +102,6 @@
 ---
 
 ## v1.7 - 现代更新
-
-**目标**：在已经完成的 ELF 解析器基础上补全进程加载链路，使内核可以真正加载并调度外部 ELF 用户程序。
 
 **新增**
 - ELF：新增 `elf_load_exec` / `elf_load_exec_simple` / `Harlin_ElfLoadExec` 接口（`src/head/elf/elf.h` + `src/harlin/elf/elf.c`），回调式完成 PT_LOAD 段解析、地址范围统计、入口点暴露

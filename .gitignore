@@ -31,3 +31,5 @@ w+number-overflow
 *.o
 *.d
 *.py
+
+.tools/
