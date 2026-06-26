@@ -312,7 +312,138 @@ void acpi_reboot(void);
 
 `acpi_init` 扫描 BIOS 内存区域查找 RSDP，通过 RSDT 定位 FADT 并从 DSDT 解析 \_S5 关机参数。`acpi_power_off` 向 PM1a_CNT 寄存器写入 SLP_TYPa | SLP_EN 触发 S5 状态。`acpi_reboot` 优先使用 FADT RESET_REG（I/O 端口），失败则回退到键盘控制器复位。
 
-## 23. 系统调用接口
+## 26. 块池 API
+```c
+void Harlin_BlockPoolInit(void);
+void* Harlin_BlockPoolAlloc(u32 size);
+int  Harlin_BlockPoolFree(void* ptr);
+u32  Harlin_BlockPoolUsed(void);
+```
+
+`Harlin_BlockPoolAlloc` 按请求大小向上对齐到最近的块大小档位并分配，块大小共 6 档（最小 16 字节）。每块带 `guard` 校验位，越界时 `pr_err` 报警。`Harlin_BlockPoolFree` 释放块并清零 guard。
+
+## 27. 读缓存 API
+
+```c
+void Harlin_ReadCacheInit(void);
+int  Harlin_ReadCacheGet(u32 key, void* buf, u32 len);
+int  Harlin_ReadCachePut(u32 key, const void* data, u32 len);
+u32  Harlin_ReadCacheHit(void);
+u32  Harlin_ReadCacheMiss(void);
+```
+
+`Harlin_ReadCacheGet` 按 key 查缓存；命中返回 1 并复制内容，未命中返回 0。`Harlin_ReadCachePut` 写入或更新条目。`Harlin_ReadCacheHit` / `Harlin_ReadCacheMiss` 给出累计命中/未命中统计。
+
+## 28. 公平选 API
+
+```c
+void Harlin_FairPickInit(void);
+int  Harlin_FairPick(int* keys, int count);
+void Harlin_FairPickTest(void);
+```
+
+`Harlin_FairPick` 从一组 key 中按累计运行时间反比例选出一个，返回选中下标；keys 为 0/负值/重复时按确定顺序轮转。
+
+## 29. 事件通知 API
+
+```c
+void Harlin_NotifyInit(void);
+int  Harlin_NotifySend(int to_pid, int event);
+int  Harlin_NotifyWait(int pid, int* out_event);
+int  Harlin_NotifyPending(int pid);
+```
+
+`Harlin_NotifySend` 将事件投递到目标进程队列；满则丢弃并返回 -1。`Harlin_NotifyWait` 从当前进程队列取出一条事件；空返回 -1。`Harlin_NotifyPending` 查看队列中待处理事件数量。
+
+## 30. 路径解析 API
+
+```c
+struct path_parts {
+    u32 count;
+    const char* seg[PATH_MAX_SEGMENTS];
+    u32  seg_len[PATH_MAX_SEGMENTS];
+    int  is_absolute;
+    char buf[PATH_MAX_CHARS];
+};
+
+int Harlin_PathParse(const char* in, struct path_parts* out);
+int Harlin_PathNormalize(const char* in, char* out, u32 out_size);
+```
+
+`Harlin_PathParse` 按 `/` 拆分路径为 `seg` 段并写入 `buf`；`is_absolute` 反映是否以 `/` 开头。`Harlin_PathNormalize` 在 `Harlin_PathParse` 基础上规范化 `.` 和 `..` 后输出到 `out`。
+
+## 31. 内存虚拟文件系统 API
+
+```c
+int  Harlin_MemFsInit(void);
+int  Harlin_MemFsMkdir(const char* path);
+int  Harlin_MemFsRmdir(const char* path);
+int  Harlin_MemFsCreate(const char* path);
+int  Harlin_MemFsRemove(const char* path);
+int  Harlin_MemFsWrite(const char* path, const void* data, u32 len);
+int  Harlin_MemFsRead(const char* path, void* buf, u32 len);
+int  Harlin_MemFsLs(const char* path, struct mem_fs_dir_entry* out, u32 max);
+u32  Harlin_MemFsLookupNode(const char* path);
+```
+
+基于节点池的目录树结构，节点数 `MEM_FS_MAX_NODES`（默认 64）。每个文件内嵌 `payload[MEM_FS_PAYLOAD]` 字节。`Harlin_MemFsLs` 将目录项以 `struct mem_fs_dir_entry { char name[32]; u8 type; }` 形式填充到 `out`，返回条目数。
+
+## 32. 文件权限位 API
+
+```c
+#define PERM_OWN_R (1u << 8)
+#define PERM_OWN_W (1u << 7)
+#define PERM_OWN_X (1u << 6)
+#define PERM_GRP_R (1u << 5)
+#define PERM_GRP_W (1u << 4)
+#define PERM_GRP_X (1u << 3)
+#define PERM_OTH_R (1u << 2)
+#define PERM_OTH_W (1u << 1)
+#define PERM_OTH_X (1u << 0)
+
+int Harlin_PermCheck(u16 mode, u16 file_owner, u16 file_group,
+                     u16 uid, u16 gid, int want);
+```
+
+`Harlin_PermCheck` 比较 `uid/gid` 与文件 `owner/group`，按 `want`（任一 rwx 位的或组合）检查权限，返回 1 表示通过、0 表示拒绝。
+
+## 33. COW 文件系统 API
+
+```c
+int  Harlin_CowFsInit(void);
+int  Harlin_CowSnapshot(const char* path, char* out_ver);
+int  Harlin_CowWrite(const char* path, const char* expected_ver,
+                     const void* data, u32 size);
+int  Harlin_CowReadAt(const char* path, const char* ver,
+                      u32 offset, void* buf, u32 len);
+int  Harlin_CowFork(const char* src_path, const char* dst_path);
+```
+
+`Harlin_CowSnapshot` 给指定文件拍一个版本快照，版本号格式 `v000`~`v999`，写入 `out_ver`（至少 5 字节）。`Harlin_CowWrite` 在文件当前最新版本为 `expected_ver` 时写入新数据，否则返回 `HARLIN_BUSY`（冲突）。`Harlin_CowReadAt` 按版本号 + 偏移读取。`Harlin_CowFork` 克隆另一文件节点的所有版本到新路径。
+
+## 34. 进程控制 API
+
+```c
+int  Harlin_Fork(int parent_pid, int* out_child_pid);
+int  Harlin_ExecFromPath(const char* path);
+int  Harlin_ExecFromBuffer(const void* elf_data, u32 elf_size);
+int  Harlin_NotifyExit(int child_pid, int code);
+int  Harlin_Wait(int parent_pid, int child_pid, int* out_code);
+int  Harlin_WaitAny(int parent_pid, int* out_child_pid, int* out_code);
+```
+
+`Harlin_Fork` 复制父进程的 rip / rsp / 页表 / stack / handles / 优先级 / fair_key，返回 0 表示成功、子 pid 通过 `out_child_pid` 返回。`Harlin_ExecFromPath` 从 mem_fs 读取 elf 并加载为新进程；`Harlin_ExecFromBuffer` 直接从内存缓冲区加载。`Harlin_NotifyExit` 登记子进程退出码；`Harlin_Wait` 等待指定子进程退出；`Harlin_WaitAny` 等待任意一个子进程退出。退出码回收后该子进程槽位可被复用。
+
+## 35. /proc 虚拟文件系统 API
+
+```c
+int Harlin_ProcFsRead(const char* path, char* out, u32 out_size);
+int Harlin_ProcFsLs(const char* path, char* out, u32 out_size);
+```
+
+`Harlin_ProcFsRead` 支持的路径：`/proc/uptime`（内核启动滴答计数）、`/proc/meminfo`（free/used 物理页数）、`/proc/cpuinfo`（CPU 数）、`/proc/loadavg`（负载占位 0.0）。`Harlin_ProcFsLs("/proc", ...)` 返回 `uptime meminfo cpuinfo loadavg` 空格分隔的列表。
+
+## 36. 系统调用接口
 
 用户态程序通过软件中断 0x80 调用内核服务。系统调用号放在 RAX 中，参数遵循 System V AMD64 ABI。
 
@@ -352,11 +483,11 @@ void acpi_reboot(void);
 
 完整的系统调用表在内核中定义，并通过 `harlin_API.h` 向用户空间导出。
 
-## 24. 版本管理
+## 37. 版本管理
 
 API 版本跟随内核版本。主版本号仅在发生不兼容的 API 变更时增加，次版本号在向后兼容地增加功能时增加。
 
-## 25. 安全模型
+## 38. 安全模型
 
 - 内核代码和数据运行在 ring 0。
 - 用户进程运行在 ring 3。

@@ -97,6 +97,12 @@ typedef signed long long   s64;
 #define HARLIN_LED_CAPS   0x04
 
 void Harlin_Boot(void);
+void Harlin_SelftestPf(void);
+void Harlin_FairPickTest(void);
+void Harlin_ForkTest(void);
+void Harlin_ExecTest(void);
+void Harlin_WaitTest(void);
+void Harlin_ProcFsTest(void);
 void Harlin_Shutdown(void);
 void Harlin_Shell(void);
 

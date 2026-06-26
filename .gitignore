@@ -33,3 +33,7 @@ w+number-overflow
 *.py
 
 .tools/
+.trae/
+tools/
+hcc_config.ini
+err.txt

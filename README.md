@@ -2,7 +2,7 @@
 
 ![HarLin Kernel Logo](docs/images/logo.png)
 
-HarLin Kernel 是由 HarLin 独立开发的 x86_64 通用操作系统内核。
+HarLin Kernel 是由 HarLin团队 开发的 x86_64 通用操作系统内核。
 
 本项目采用统一 API 层设计，提供基础硬件抽象与驱动接口，便于第三方开发者基于本内核进行二次开发、功能扩展与再发布。
 
@@ -33,6 +33,11 @@ HarLin Kernel 是由 HarLin 独立开发的 x86_64 通用操作系统内核。
 ### 文件系统
 - MBR 分区表解析
 - FAT32：文件读写、创建、删除、目录遍历
+- 内存虚拟文件系统 (mem_fs)：节点池目录树，支持 mkdir/rmdir/create/remove/read/write/ls
+- 路径解析：绝对/相对路径按 `/` 拆段，`.` / `..` 规范化
+- 文件权限位：9 位 rwx（owner/group/other × read/write/execute）
+- COW 文件系统：版本快照、跨版本条件写、分支克隆
+- /proc 虚拟文件系统：uptime / meminfo / cpuinfo / loadavg 动态内容
 
 ### 网络协议栈
 - ARP、IP、ICMP（Ping 响应）
@@ -42,6 +47,12 @@ HarLin Kernel 是由 HarLin 独立开发的 x86_64 通用操作系统内核。
 
 ### 进程间通信
 - 管道（Pipe）：创建、读写、关闭
+- 进程控制：fork（写时复制子进程）、exec（加载并执行 ELF）、wait（父等子退出码）
+
+### 内核内存管理扩展
+- 块池（block_pool）：固定大小块的 slab 式分配，guard 校验
+- 读缓存（read_cache）：页面缓存与命中统计
+- 事件通知（notify）：轻量级进程间事件机制
 
 ### 图形与显示
 - VGA 文本模式（80x25）、VGA 13H 图形模式（320x200，256 色）

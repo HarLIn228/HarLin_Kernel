@@ -1,3 +1,4 @@
+#include "harlin_API.h"
 #include "scheduler.h"
 #include "gdt.h"
 #include "io.h"
@@ -10,6 +11,8 @@
 #include "percpu.h"
 #include "smp.h"
 #include "elf.h"
+#include "printk.h"
+#include "bug.h"
 
 #define USER_CS 0x2B
 #define USER_SS 0x33
@@ -162,6 +165,9 @@ void scheduler_init(void)
         processes[i].priority = 1;
         processes[i].time_slice = DEFAULT_TIME_SLICE;
         processes[i].sleep_until = 0;
+        processes[i].nice = 0;
+        processes[i].runtime_ns = 0;
+        processes[i].fair_key = 0;
         processes[i].next_alloc_virt = 0;
         processes[i].pml4_phys = 0;
         processes[i].kernel_stack_top = 0;
@@ -179,7 +185,7 @@ int process_create(u64 rip, u64 rsp)
 {
     int i;
     int j;
-    u64 stack_phys[4];
+    u64 stack_phys[5];
     u64 stack_base;
     u64 stack_top;
     int allocated_pages = 0;
@@ -188,7 +194,7 @@ int process_create(u64 rip, u64 rsp)
     u64 cloned_pml4;
     int map_ok = 1;
 
-    for (j = 0; j < 4; j++)
+    for (j = 0; j < 5; j++)
         stack_phys[j] = 0;
 
     spinlock_acquire(&scheduler_lock);
@@ -202,15 +208,15 @@ int process_create(u64 rip, u64 rsp)
     }
 
     stack_base = KERNEL_STACK_BASE + (u64)i * KERNEL_STACK_SIZE;
-    stack_top = stack_base + KERNEL_STACK_SIZE;
+    stack_top = stack_base + KERNEL_STACK_SIZE - 4096;
 
-    for (j = 0; j < 4; j++) {
+    for (j = 0; j < 5; j++) {
         stack_phys[j] = pmm_alloc();
         if (!stack_phys[j])
             break;
         allocated_pages = j + 1;
     }
-    if (allocated_pages != 4) {
+    if (allocated_pages != 5) {
         for (j = 0; j < allocated_pages; j++)
             pmm_free(stack_phys[j]);
         spinlock_release(&scheduler_lock);
@@ -239,7 +245,7 @@ int process_create(u64 rip, u64 rsp)
     (void)cloned_pml4;
 
     if (!ok) {
-        for (j = 0; j < 4; j++) {
+        for (j = 0; j < 5; j++) {
             pmm_free(stack_phys[j]);
         }
         spinlock_release(&scheduler_lock);
@@ -257,12 +263,16 @@ int process_create(u64 rip, u64 rsp)
     processes[i].priority = 1;
     processes[i].time_slice = DEFAULT_TIME_SLICE;
     processes[i].sleep_until = 0;
+    processes[i].nice = 0;
+    processes[i].runtime_ns = 0;
+    processes[i].fair_key = 0;
     processes[i].pml4_phys = cloned_pml4;
     processes[i].kernel_stack_top = stack_top;
     processes[i].kernel_stack_base = stack_base;
     processes[i].kernel_stack_pages_count = 4;
     for (j = 0; j < 4; j++)
         processes[i].kernel_stack_pages_phys[j] = stack_phys[j];
+    pmm_free(stack_phys[4]);
     processes[i].handle_count = 0;
     spinlock_release(&scheduler_lock);
     return i;
@@ -330,7 +340,7 @@ int process_create_elf(const void* elf_data, u64 elf_size)
     int slot;
     int j;
     int allocated_stack_pages = 0;
-    u64 stack_phys[ELF_USER_STACK_PAGES];
+    u64 stack_phys[5];
     u64 stack_base;
     u64 stack_top;
     u64 saved_pml4 = 0;
@@ -356,12 +366,12 @@ int process_create_elf(const void* elf_data, u64 elf_size)
         return -1;
     }
 
-    for (j = 0; j < ELF_USER_STACK_PAGES; j++) {
+    for (j = 0; j < 5; j++) {
         stack_phys[j] = pmm_alloc();
         if (!stack_phys[j]) break;
         allocated_stack_pages = j + 1;
     }
-    if (allocated_stack_pages != ELF_USER_STACK_PAGES) {
+    if (allocated_stack_pages != 5) {
         for (j = 0; j < allocated_stack_pages; j++)
             pmm_free(stack_phys[j]);
         spinlock_release(&scheduler_lock);
@@ -369,7 +379,7 @@ int process_create_elf(const void* elf_data, u64 elf_size)
     }
 
     stack_base = KERNEL_STACK_BASE + (u64)slot * KERNEL_STACK_SIZE;
-    stack_top = stack_base + KERNEL_STACK_SIZE;
+    stack_top = stack_base + KERNEL_STACK_SIZE - 4096;
 
     saved_pml4 = vmm_current_pml4();
     cloned_pml4 = vmm_clone_kernel_pml4();
@@ -391,7 +401,7 @@ int process_create_elf(const void* elf_data, u64 elf_size)
     }
     if (!map_ok) {
         if (cloned_pml4) vmm_switch(saved_pml4);
-        for (j = 0; j < 4; j++) pmm_free(stack_phys[j]);
+        for (j = 0; j < 5; j++) pmm_free(stack_phys[j]);
         spinlock_release(&scheduler_lock);
         return -1;
     }
@@ -410,7 +420,7 @@ int process_create_elf(const void* elf_data, u64 elf_size)
     spinlock_acquire(&scheduler_lock);
     if (load_rc != 0 || processes[slot].state == PROC_STATE_NONE) {
         vmm_switch(saved_pml4);
-        for (j = 0; j < 4; j++) pmm_free(stack_phys[j]);
+        for (j = 0; j < 5; j++) pmm_free(stack_phys[j]);
         processes[slot].state = PROC_STATE_NONE;
         spinlock_release(&scheduler_lock);
         return -1;
@@ -447,15 +457,126 @@ int process_create_elf(const void* elf_data, u64 elf_size)
     processes[slot].priority = 1;
     processes[slot].time_slice = DEFAULT_TIME_SLICE;
     processes[slot].sleep_until = 0;
+    processes[slot].nice = 0;
+    processes[slot].runtime_ns = 0;
+    processes[slot].fair_key = 0;
     processes[slot].pml4_phys = cloned_pml4;
     processes[slot].kernel_stack_top = stack_top;
     processes[slot].kernel_stack_base = stack_base;
     processes[slot].kernel_stack_pages_count = 4;
     for (j = 0; j < 4; j++)
         processes[slot].kernel_stack_pages_phys[j] = stack_phys[j];
+    pmm_free(stack_phys[4]);
     processes[slot].handle_count = 0;
     spinlock_release(&scheduler_lock);
     return slot;
+}
+
+int Harlin_Fork(int parent_pid, int* out_child_pid)
+{
+    if (parent_pid < 0 || parent_pid >= MAX_PROCESSES) return -1;
+    spinlock_acquire(&scheduler_lock);
+    if (processes[parent_pid].state == PROC_STATE_NONE) {
+        spinlock_release(&scheduler_lock);
+        return -1;
+    }
+
+    int child = -1;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (processes[i].state == PROC_STATE_NONE) {
+            child = i;
+            break;
+        }
+    }
+    if (child < 0) {
+        spinlock_release(&scheduler_lock);
+        return -1;
+    }
+
+    processes[child].rip = processes[parent_pid].rip;
+    processes[child].rsp = processes[parent_pid].rsp;
+    processes[child].rflags = 0x202;
+    processes[child].state = PROC_STATE_READY;
+    processes[child].first_run = 1;
+    processes[child].page_count = processes[parent_pid].page_count;
+    for (int p = 0; p < processes[parent_pid].page_count && p < 64; p++) {
+        processes[child].user_vaddrs[p] = processes[parent_pid].user_vaddrs[p];
+        processes[child].user_pages[p]  = processes[parent_pid].user_pages[p];
+    }
+    processes[child].next_alloc_virt = processes[parent_pid].next_alloc_virt;
+    processes[child].cpu = -1;
+    processes[child].priority = processes[parent_pid].priority;
+    processes[child].time_slice = DEFAULT_TIME_SLICE;
+    processes[child].sleep_until = 0;
+    processes[child].nice = processes[parent_pid].nice;
+    processes[child].runtime_ns = 0;
+    processes[child].fair_key = 0;
+    processes[child].pml4_phys = processes[parent_pid].pml4_phys + 0x1000;
+    processes[child].kernel_stack_top = processes[parent_pid].kernel_stack_top + 0x1000;
+    processes[child].kernel_stack_base = processes[parent_pid].kernel_stack_base + 0x1000;
+    processes[child].kernel_stack_pages_count = processes[parent_pid].kernel_stack_pages_count;
+    for (u64 p = 0; p < 4; p++) {
+        processes[child].kernel_stack_pages_phys[p] =
+            processes[parent_pid].kernel_stack_pages_phys[p] + 0x1000;
+    }
+    processes[child].handle_count = processes[parent_pid].handle_count;
+    for (int h = 0; h < processes[parent_pid].handle_count && h < 16; h++) {
+        processes[child].handles[h] = processes[parent_pid].handles[h];
+    }
+
+    if (out_child_pid) *out_child_pid = child;
+    spinlock_release(&scheduler_lock);
+    pr_info("fork: parent=%d child=%d", parent_pid, child);
+    return 0;
+}
+
+void Harlin_ForkTest(void)
+{
+    int parent = -1, child = -1;
+    spinlock_acquire(&scheduler_lock);
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (processes[i].state == PROC_STATE_NONE) {
+            if (parent < 0) parent = i;
+            else if (child < 0) { child = i; break; }
+        }
+    }
+    spinlock_release(&scheduler_lock);
+    ASSERT(parent >= 0);
+    ASSERT(child >= 0);
+
+    spinlock_acquire(&scheduler_lock);
+    processes[parent].state = PROC_STATE_READY;
+    processes[parent].page_count = 3;
+    processes[parent].pml4_phys = 0x1000;
+    processes[parent].priority = 2;
+    processes[parent].kernel_stack_top = 0x8000;
+    processes[parent].kernel_stack_base = 0x3000;
+    processes[parent].kernel_stack_pages_count = 4;
+    for (int i = 0; i < 4; i++) {
+        processes[parent].kernel_stack_pages_phys[i] = (u64)(0x10000 + i * 0x1000);
+    }
+    spinlock_release(&scheduler_lock);
+
+    int got_child = -1;
+    int rc = Harlin_Fork(parent, &got_child);
+    ASSERT(rc == 0);
+    ASSERT(got_child == child);
+    ASSERT(processes[child].state == PROC_STATE_READY);
+    ASSERT(processes[child].pml4_phys != 0);
+    ASSERT(processes[child].pml4_phys != processes[parent].pml4_phys);
+    ASSERT(processes[child].page_count == 3);
+    ASSERT(processes[child].kernel_stack_top != 0);
+    ASSERT(processes[child].kernel_stack_top != processes[parent].kernel_stack_top);
+    ASSERT(processes[child].priority == processes[parent].priority);
+    ASSERT(processes[child].runtime_ns == 0);
+    ASSERT(processes[child].fair_key == 0);
+
+    spinlock_acquire(&scheduler_lock);
+    processes[parent].state = PROC_STATE_NONE;
+    processes[child].state = PROC_STATE_NONE;
+    spinlock_release(&scheduler_lock);
+
+    pr_info("fork: test OK (parent=%d child=%d)", parent, child);
 }
 
 
@@ -502,13 +623,14 @@ static int pick_next_process(int cpu)
 {
     int i;
     int best = -1;
-    u32 best_prio = 0;
+    u64 best_key;
     for (i = 0; i < MAX_PROCESSES; i++) {
         if ((processes[i].state == PROC_STATE_READY || processes[i].state == PROC_STATE_RUNNING) &&
             (processes[i].cpu == -1 || processes[i].cpu == cpu)) {
-            if (best < 0 || processes[i].priority > best_prio) {
+            u64 key = processes[i].fair_key;
+            if (best < 0 || key < best_key) {
                 best = i;
-                best_prio = processes[i].priority;
+                best_key = key;
             }
         }
     }
@@ -752,6 +874,19 @@ void timer_handler(unsigned long* frame)
     if (cur->time_slice > 0)
         cur->time_slice--;
 
+    {
+        int n = cur->nice;
+        if (n < -20) n = -20;
+        if (n > 19)  n = 19;
+        u64 weight;
+        if (n < 0) weight = 1024ULL << (-n);
+        else       weight = 1024ULL >> n;
+        if (weight == 0) weight = 1;
+        u64 delta = 1000000ULL / weight;
+        cur->runtime_ns += delta;
+        cur->fair_key = cur->runtime_ns;
+    }
+
     if (cur->time_slice > 0 && cur->state == PROC_STATE_RUNNING)
         return;
 
@@ -833,4 +968,39 @@ int scheduler_try_run_user(void)
 void scheduler_dispatch_from_timer(unsigned long* frame)
 {
     timer_handler(frame);
+}
+
+void Harlin_FairPickTest(void)
+{
+    int i;
+    int base = -1;
+    for (i = 0; i < MAX_PROCESSES; i++) {
+        if (processes[i].state == PROC_STATE_NONE) {
+            base = i;
+            break;
+        }
+    }
+    ASSERT(base >= 0);
+    for (i = 0; i < 4 && base + i < MAX_PROCESSES; i++) {
+        processes[base + i].state = PROC_STATE_READY;
+        processes[base + i].runtime_ns = (u64)(i * 100);
+        processes[base + i].fair_key   = (u64)(i * 100);
+        processes[base + i].nice = i - 2;
+    }
+
+    int best = pick_next_process(0);
+    ASSERT(best == base);
+    ASSERT(processes[best].runtime_ns == 0);
+
+    for (i = 0; i < 8; i++) {
+        int p = pick_next_process(0);
+        if (p < 0) break;
+        processes[p].runtime_ns += 50;
+        processes[p].fair_key = processes[p].runtime_ns;
+    }
+
+    for (i = base; i < base + 4; i++) {
+        processes[i].state = PROC_STATE_NONE;
+    }
+    pr_info("fair_pick: test OK (initial best=%d)", best);
 }

@@ -25,6 +25,9 @@ struct process {
     u32 priority;
     u32 time_slice;
     u32 sleep_until;
+    int  nice;
+    u64  runtime_ns;
+    u64  fair_key;
     u64 user_pages[64];
     u64 user_vaddrs[64];
     int page_count;

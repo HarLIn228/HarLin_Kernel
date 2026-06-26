@@ -1,5 +1,39 @@
 # HarLin Kernel version.md
 
+## v1.8 - 突破更新
+
+**新增**
+- 路径解析：新增 `Harlin_PathParse` / `Harlin_PathNormalize` 接口（`src/head/fs/path_walk.h` + `src/harlin/fs/path_walk.c`），按 `/` 拆分路径段为 `struct path_parts`，规范化处理 `.` 与 `..` 路径段，支持绝对路径与相对路径
+- 内存虚拟文件系统：新增 mem_fs 节点池（`src/head/fs/mem_fs.h` + `src/harlin/fs/mem_fs.c`），提供 `Harlin_MemFsInit` / `Harlin_MemFsMkdir` / `Harlin_MemFsRmdir` / `Harlin_MemFsCreate` / `Harlin_MemFsRemove` / `Harlin_MemFsWrite` / `Harlin_MemFsRead` / `Harlin_MemFsLs` / `Harlin_MemFsLookupNode` 完整目录树增删查能力
+- 文件权限位：新增 9 位 rwx 权限位（owner/group/other × read/write/execute）与 `Harlin_PermCheck` 检查函数（`src/head/fs/perm.h` + `src/harlin/fs/perm.c`），按 uid/gid 匹配 owner/group/other 权限位
+- COW 文件系统：新增 `Harlin_CowFsInit` / `Harlin_CowSnapshot` / `Harlin_CowWrite` / `Harlin_CowReadAt` / `Harlin_CowFork`（`src/head/fs/cow_fs.h` + `src/harlin/fs/cow_fs.c`），基于 mem_fs 文件节点按版本号（`v000` ~ `v999`）维护多版本快照，条件写检查 `expected_ver` 解决写写冲突，跨文件节点版本全量克隆
+- 进程：新增 `Harlin_Fork(parent_pid, out_child_pid)` 与 `Harlin_ForkTest`（`src/harlin/proc/scheduler.c`），按父进程描述符克隆 rip/rsp/页表/stack/handles/优先级/fair_key 字段
+- 进程：新增 `Harlin_ExecFromBuffer(elf, size)` / `Harlin_ExecFromPath(path)` / `Harlin_ExecTest`（`src/harlin/proc/exec.c`），封装 `process_create_elf` 提供 elf 缓冲区与路径两种 exec 入口
+- 进程：新增 wait 子进程退出表（`src/head/proc/wait.h` + `src/harlin/proc/wait.c`），`Harlin_NotifyExit` / `Harlin_Wait` / `Harlin_WaitAny` 三个 API + `Harlin_WaitTest`
+- /proc 虚拟文件系统：新增 `Harlin_ProcFsInit` / `Harlin_ProcFsRead` / `Harlin_ProcFsLs` / `Harlin_ProcFsTest`（`src/head/fs/proc_fs.h` + `src/harlin/fs/proc_fs.c`），动态生成 `/proc/uptime` / `/proc/meminfo` / `/proc/cpuinfo` / `/proc/loadavg` 文本
+- 启动流程：`Harlin_Boot` 自测段新增 `Harlin_ForkTest` / `Harlin_ExecTest` / `Harlin_WaitTest` / `Harlin_ProcFsTest` 调用（`src/harlin/syscall/harlin_API.c`）
+
+**变更**
+- 命名：4.x 阶段所有公共 API 改为口语化命名 + `Harlin_` 前缀——`slab` 系列改为 `block_pool`（`slab` → `block_pool`、`slab_alloc` → `block_pool_alloc`、`slab_free` → `block_pool_free`、`slab.c` → `block_pool.c`），chunk 替代 slab 中的 object 语义术语，`canary` 改为 `guard`
+- 命名：`page_cache` 整组改为 `read_cache`（`Harlin_ReadCacheInit` / `Harlin_ReadCacheGet` / `Harlin_ReadCachePut` / `Harlin_ReadCacheTest`）
+- 命名：`signal` 整组改为 `event` / `notify`（`Harlin_NotifyInit` / `Harlin_NotifySend` / `Harlin_NotifyWait` / `Harlin_NotifyTest`）
+- 命名：CFS 调度自测 `cfs_selftest` 改为 `Harlin_FairPickTest`
+- COW：COW 文件系统内部 16 槽 `struct cow_version`（used / file_node / ver 字符串 / payload）改为按 `file_node` 分组的版本池；版本号生成走 `ver_counter` 全局计数 + `make_ver_name` 拼出 `v000`~`v999`
+- 自测：阶段五全部自测（`Harlin_PathTest` / `Harlin_MemFsTest` / `Harlin_PermTest` / `Harlin_CowTest` / `Harlin_ForkTest` / `Harlin_ExecTest` / `Harlin_WaitTest` / `Harlin_ProcFsTest`）按顺序串联在 `Harlin_Boot` 早期阶段
+- C++重写了`Build.exe`,`Build.bat`回归
+
+**修复**
+- 中断：缺页处理函数 `page_fault_handler` 改名为 `Harlin_PageFaultHandler`（声明与中断分发同步更新），消除与 `Harlin_` 公共 API 命名规范的脱节
+- mem_fs：节点结构补齐 `mode` / `owner` / `group` 权限位字段，确保 `Harlin_PermCheck` 输入端字段齐全
+- COW：修复 `Harlin_CowSnapshot` 直接返回空版本号导致 `Harlin_CowWrite` 找不到 base 版本的连锁错误，改为快照时分配 `ver_counter++` 唯一版本字符串
+- COW：修复 `cow_fs.c` 直接调用 `mem_fs.c` 的 `static resolve_path` 链接失败，在 `mem_fs.c` 暴露 `Harlin_MemFsLookupNode` 公共 API
+- 头：修复 `cow_fs.h` 引用 `MEM_FS_PAYLOAD` 宏未 include `mem_fs.h` 的间接依赖错误
+- 函数签名：阶段五自测入口全部统一为 `void Test(void)` 返回值（`Harlin_ForkTest` / `Harlin_ExecTest` / `Harlin_WaitTest` / `Harlin_ProcFsTest`），与 `Harlin_Boot` 调用端类型一致
+- 编译：修复 `process_create_elf` 链路 scheduler.c 未 include `harlin_API.h` 导致的 prototype 推断冲突
+- 编译：修复 `Harlin_ForkTest` 残留 `return 0;` 与 `void` 返回类型不匹配
+
+---
+
 ## v1.7.4
 
 **新增**

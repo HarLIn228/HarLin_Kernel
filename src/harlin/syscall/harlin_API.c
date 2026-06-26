@@ -14,6 +14,13 @@
 #include "pipe.h"
 #include "ipc.h"
 #include "kmalloc.h"
+#include "slab.h"
+#include "page_cache.h"
+#include "signal.h"
+#include "path_walk.h"
+#include "mem_fs.h"
+#include "perm.h"
+#include "cow_fs.h"
 #include "spinlock.h"
 
 #undef Harlin_Kmalloc
@@ -458,6 +465,22 @@ void Harlin_Boot(void)
         const char* s = "[BOOT] vmm done\n";
         while (*s) { asm volatile ("outb %0, %1" : : "a"((unsigned char)*s++), "Nd"((unsigned short)0x0402)); }
     }
+    Harlin_SelftestPf();
+    Harlin_BlockPoolInit();
+    Harlin_BlockPoolTest();
+    Harlin_ReadCacheInit();
+    Harlin_ReadCacheTest();
+    Harlin_FairPickTest();
+    Harlin_NotifyInit();
+    Harlin_NotifyTest();
+    Harlin_PathTest();
+    Harlin_MemFsTest();
+    Harlin_PermTest();
+    Harlin_CowTest();
+    Harlin_ForkTest();
+    Harlin_ExecTest();
+    Harlin_WaitTest();
+    Harlin_ProcFsTest();
     keyboard_init();
     scheduler_init();
     timer_init();

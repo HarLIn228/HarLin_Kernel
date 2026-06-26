@@ -1,4 +1,88 @@
 #include "harlin_API.h"
+#include "printk.h"
+#include "bug.h"
+#include "vmm.h"
+#include "pmm.h"
+#include "page_fault.h"
+
+#define SELFTEST_VIRT_BASE 0xFFFF800010000000ULL
+#define SELFTEST_VIRT_STRIDE 0x1000ULL
+#define SELFTEST_VIRT_COUNT 8
+
+static u64 selftest_va_array[SELFTEST_VIRT_COUNT];
+
+static void selftest_pf_demand(void)
+{
+    u64 phys;
+    u8* p;
+    u64 i;
+    u64 va;
+
+    pr_info("selftest: page_fault demand mapping start");
+    for (i = 0; i < SELFTEST_VIRT_COUNT; i++) {
+        va = SELFTEST_VIRT_BASE + i * SELFTEST_VIRT_STRIDE;
+        selftest_va_array[i] = va;
+        phys = pmm_alloc();
+        ASSERT(phys != 0);
+        p = (u8*)phys;
+        p[0] = 0x5A;
+        p[1] = 0xA5;
+        p[4095] = (u8)i;
+        ASSERT(vmm_map(va, phys, 0x03) == 0);
+    }
+    for (i = 0; i < SELFTEST_VIRT_COUNT; i++) {
+        va = selftest_va_array[i];
+        u8* q = (u8*)va;
+        ASSERT(q[0] == 0x5A);
+        ASSERT(q[1] == 0xA5);
+        ASSERT(q[4095] == (u8)i);
+    }
+    pr_info("selftest: page_fault demand mapping OK (%llu pages)",
+            (unsigned long long)SELFTEST_VIRT_COUNT);
+}
+
+static void selftest_pf_cow(void)
+{
+    u64 va0 = SELFTEST_VIRT_BASE - SELFTEST_VIRT_STRIDE;
+    u64 phys0 = pmm_alloc();
+    u8* p0 = (u8*)phys0;
+    u64 phys_after;
+    u8* p_after;
+
+    pr_info("selftest: COW simulate start");
+    ASSERT(phys0 != 0);
+    for (u64 i = 0; i < 4096; i++) p0[i] = (u8)(i & 0xFF);
+    ASSERT(vmm_map(va0, phys0, 0x01) == 0);
+
+    vmm_unmap(va0);
+    ASSERT(vmm_mapped(va0) == 0);
+
+    ASSERT(Harlin_PageFaultDemandInstall(va0, 0x01) == 0);
+    p_after = (u8*)va0;
+    p_after[0] = 0xCC;
+
+    ASSERT(Harlin_PageFaultCowResolve(va0, 0x03) == 0);
+    phys_after = vmm_get_phys(va0);
+    ASSERT(phys_after != 0);
+    ASSERT(phys_after != phys0);
+    p_after = (u8*)va0;
+    p_after[0] = 0xDD;
+    ASSERT(p_after[0] == 0xDD);
+    ASSERT(((u8*)phys0)[0] == 0xCC);
+    pr_info("selftest: COW simulate OK (orig phys=%p new phys=%p)",
+            (void*)phys0, (void*)phys_after);
+}
+
+static void selftest_pf(void)
+{
+    selftest_pf_demand();
+    selftest_pf_cow();
+}
+
+void Harlin_SelftestPf(void)
+{
+    selftest_pf();
+}
 
 extern char __bss_start[];
 extern char __bss_end[];
@@ -71,5 +155,7 @@ void __attribute__((section(".text.kernel_main"))) kernel_main(void)
     }
     clear_bss();
     debugcon_puts("[KMAIN] bss cleared\n");
+    pr_info("HarLin Kernel v1.7.4+ boot, bss cleared");
+    ASSERT(__bss_start <= __bss_end);
     Harlin_Boot();
 }

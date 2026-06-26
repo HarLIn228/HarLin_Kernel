@@ -73,7 +73,7 @@ isr14_stub:
     mov rax, cr2
     mov rdi, rax
     xor rsi, rsi
-    call page_fault_handler
+    call Harlin_PageFaultHandler
     pop r15
     pop r14
     pop r13
@@ -92,7 +92,7 @@ isr14_stub:
     add rsp, 8
     iretq
 
-extern page_fault_handler
+extern Harlin_PageFaultHandler
 
 isr_common:
     push rax

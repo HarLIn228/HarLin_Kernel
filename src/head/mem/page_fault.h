@@ -11,12 +11,8 @@
 
 #define PF_ERR_PROTECTION  (1 << 1)
 
-void page_fault_handler(u64 fault_addr, u64 error_code);
-int page_fault_demand_mapping_install(u64 virt, u64 flags);
-int page_fault_cow_resolve(u64 virt, u64 flags);
-
-#define Harlin_PageFaultHandler         page_fault_handler
-#define Harlin_PageFaultDemandInstall   page_fault_demand_mapping_install
-#define Harlin_PageFaultCowResolve      page_fault_cow_resolve
+void Harlin_PageFaultHandler(u64 fault_addr, u64 error_code);
+int  Harlin_PageFaultDemandInstall(u64 virt, u64 flags);
+int  Harlin_PageFaultCowResolve(u64 virt, u64 flags);
 
 #endif
